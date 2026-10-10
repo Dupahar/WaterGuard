@@ -23,7 +23,7 @@ from pathlib import Path
 import geopandas as gpd
 
 from . import flowpath
-from .config import DATA_DIR
+from .config import CACHE_DIR, DATA_DIR
 
 RUNS_DIR = DATA_DIR / "runs"
 DEV = str.maketrans("०१२३४५६७८९", "0123456789")
@@ -142,6 +142,8 @@ class RunTools:
     def trace_flood_path(self, lon: float, lat: float) -> dict:
         from .grid import Grid
         wd = Path(self.facts["terrain_workdir"])
+        if not wd.exists():   # run made on another machine: same terrain cache, local cache dir
+            wd = CACHE_DIR / Path(wd.as_posix().replace("\\", "/")).name
         line, exited = flowpath.trace(wd, lon, lat)
         g = Grid.from_bbox(tuple(self.facts["area"]["bbox"]))   # the run's 10 m analysis grid
         if line is None:

@@ -7,12 +7,13 @@
 Point at a map, pick a date, and WaterGuard tells rescue teams **where the flood hit, what it broke, and who is now cut off**, using nothing but free satellite data.
 
 [![Watch the film](https://img.shields.io/badge/▶_Watch_the_film-YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/4vqE-tZAP90)
-[![Live demo](https://img.shields.io/badge/Live_demo_on_AWS-coming_soon-FF9900?style=for-the-badge&logo=amazonwebservices&logoColor=white)](#-run-it-yourself)
+[![Live demo](https://img.shields.io/badge/🌍_Try_it_live-on_AWS-FF9900?style=for-the-badge&logo=amazonwebservices&logoColor=white)](https://d1sgb39rsg0dlm.cloudfront.net)
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![OpenCV](https://img.shields.io/badge/OpenCV-5C3EE8?logo=opencv&logoColor=white)
 ![MapLibre](https://img.shields.io/badge/MapLibre_GL-396CB2?logo=maplibre&logoColor=white)
+![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
 ![Amazon Bedrock](https://img.shields.io/badge/Amazon_Bedrock-FF9900?logo=amazonwebservices&logoColor=white)
 ![Sentinel-1](https://img.shields.io/badge/Sentinel--1-radar-0B3D91)
 ![Sentinel-2](https://img.shields.io/badge/Sentinel--2-optical-2E8B57)
@@ -111,6 +112,17 @@ python scripts/fetch_emsr927.py         # downloads the EMS reference vectors to
 python -m waterguard.validate           # scores AOI01, 02, 03, 05 + the false-alarm tests
 python -m pytest tests/test_core.py -q  # offline unit tests
 ```
+
+## ☁️ Deploy on AWS
+
+The live demo runs on one EC2 `t3.xlarge` (Docker) behind CloudFront for HTTPS. Secrets live in SSM Parameter Store, and the copilot calls Amazon Bedrock through the instance role, so no keys are baked into the image or the repo.
+
+```bash
+# upload app + finished runs/caches to S3 and put your .env in SSM (/waterguard/env), then:
+bash deploy/aws_deploy.sh               # IAM role, CloudFront-only security group, EC2, CloudFront
+```
+
+`deploy/user-data.sh` is the boot script: it pulls the bundle, builds the `Dockerfile` and serves on port 80. Only one flood run executes at a time (`WATERGUARD_MAX_JOBS`); others wait in a queue.
 
 ## 🧠 How it works
 

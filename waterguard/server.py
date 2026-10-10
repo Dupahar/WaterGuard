@@ -9,6 +9,7 @@ POST /api/runs/{id}/trace {lon, lat}        flood path from a point + settlement
 GET  /runs/{id}/<file>                      layers (GeoJSON / PNG overlays)
 """
 import json
+import os
 import threading
 import traceback
 
@@ -24,6 +25,8 @@ from .pipeline import RUNS_DIR, run, run_id
 app = FastAPI(title="WaterGuard")
 JOBS: dict = {}
 LOCK = threading.Lock()
+# Runs are memory-hungry: on a shared server, execute at most this many at once (the rest wait as "queued").
+SLOTS = threading.Semaphore(int(os.getenv("WATERGUARD_MAX_JOBS", "1")))
 STATIC = ROOT / "web"
 
 
@@ -63,7 +66,8 @@ def start(req: RunReq):
 
     def work():
         try:
-            run(req.bbox, date, progress=lambda m, p: JOBS[rid].update(step=m, pct=p))
+            with SLOTS:
+                run(req.bbox, date, progress=lambda m, p: JOBS[rid].update(step=m, pct=p))
             JOBS[rid]["state"] = "done"
         except Exception as e:
             traceback.print_exc()
