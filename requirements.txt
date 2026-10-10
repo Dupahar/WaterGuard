@@ -1,0 +1,23 @@
+# Pinned, tested on Windows 11 / Python 3.13.9 (2026-10-06)
+opencv-contrib-python-headless==5.0.0.93
+numpy==2.2.1
+scipy==1.15.1
+rasterio==1.4.4
+pyproj==3.7.2
+shapely==2.1.2
+geopandas==1.1.1
+pyarrow==23.0.0
+networkx==3.4.2
+pystac-client==0.9.0
+planetary-computer==1.0.0
+requests==2.32.5
+python-dotenv==1.2.1
+whitebox==2.3.6
+fastapi==0.128.0
+uvicorn==0.40.0
+pydantic==2.12.5
+# copilot LLM backends (optional; the copilot works offline without them)
+boto3==1.43.110
+openai==2.21.0
+# tests
+pytest==9.0.2

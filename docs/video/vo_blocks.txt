@@ -1,0 +1,26 @@
+BLOCK 1  ->  save as k1.mp3
+On the night of the twenty-fifth of August 2026, a glacier collapsed high above the Bhote Koshi in northern Nepal. A wall of water, ice and debris raced down the Trishuli valley. Roads, bridges and phone lines went with it.
+
+BLOCK 2  ->  save as k2.mp3
+Rescuers needed three answers, fast. Where did the flood hit? What was damaged? And who is cut off? WaterGuard answers them from space.
+
+BLOCK 3  ->  save as k3.mp3
+Give it an area and a flood date. It uses only free data: Sentinel-1 radar, Sentinel-2, the Copernicus elevation model, and OpenStreetMap as it was the day before. Radar sees through monsoon cloud. We compare the first image after the flood with five earlier images from the same orbit, and mask the slopes the radar cannot see.
+
+BLOCK 4  ->  save as k4.mp3
+Where the sky cleared, Sentinel-2 shows stripped forest and fresh sediment. The elevation model shows where a surge can reach. Together they become the impact map: one hundred and seventy-four hectares at Syapru Besi.
+
+BLOCK 5  ->  save as k5.mp3
+Over it, the map from the day before. Two hundred and twenty-seven buildings likely hit. Eleven kilometres of road. Eight bridges likely gone.
+
+BLOCK 6  ->  save as k6.mp3
+Then the road network. Remove the washed-out roads and bridges, and ask who can still reach a town, a health post, or the way out. In Syabru Bensi, two in three buildings have no road left. Downstream at Bidur, about eleven thousand people are stranded.
+
+BLOCK 7  ->  save as k7.mp3
+Rescuers can ask in English or Nepali. The copilot has no numbers of its own. It reads the maps through tools, and a verifier checks every number before it is shown. One click prints a one-page situation report. And from any point upstream, it traces the flood path down the valley.
+
+BLOCK 8  ->  save as k8.mp3
+We checked it against the official Copernicus emergency maps. On two valleys we never tuned on, it scores zero point nine two and zero point eight eight. Of the buildings Copernicus rated destroyed, at least nine in ten fall inside our map. On a fake date, and on a valley the flood missed, it maps nothing.
+
+BLOCK 9  ->  save as k9.mp3
+Satellites pass every few days, so WaterGuard cannot warn. But when the next valley goes dark, rescuers will know where to go first. WaterGuard.

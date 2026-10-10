@@ -1,0 +1,9 @@
+.env
+.venv/
+.scratch/
+data/
+__pycache__/
+*.tif
+.pytest_cache/
+video/node_modules/
+video/out/

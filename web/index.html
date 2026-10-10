@@ -1,0 +1,85 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WaterGuard: flood damage from space</title>
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css">
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div id="map"></div>
+
+<div class="topbar">
+  <div class="brand"><span class="logo">◉</span><div><strong>WaterGuard</strong><small>Flood damage from space · Sentinel-1/2 · Copernicus DEM · OSM</small></div></div>
+  <div class="basemap" role="group" aria-label="Basemap">
+    <button data-base="dark" aria-pressed="true">Map</button>
+    <button data-base="imagery" aria-pressed="false">Imagery</button>
+  </div>
+</div>
+
+<div class="layers" id="layers"></div>
+<div class="legend" id="legend" hidden></div>
+<div class="hint" id="hint" hidden></div>
+
+<aside class="panel">
+  <section class="card" id="runCard">
+    <h3>1 · Area and flood date</h3>
+    <div class="row">
+      <label>Flood date <input type="date" id="date" value="2026-08-26"></label>
+      <label>Hour (UTC) <input type="number" id="hour" min="0" max="23" value="0" style="width:60px"></label>
+    </div>
+    <div class="row">
+      <button id="drawBtn" class="ghost">▭ Draw area on map</button>
+      <select id="preset">
+        <option value="">Example areas…</option>
+        <option value="85.313,28.139,85.358,28.198|2026-08-25T22">Trishuli GLOF · Syapru Besi (EMSR927 AOI01)</option>
+        <option value="85.347,28.232,85.391,28.290|2026-08-25T22">Trishuli GLOF · Timure (EMSR927 AOI02)</option>
+        <option value="85.089,27.847,85.203,28.019|2026-08-25T22">Trishuli GLOF · Bidur (EMSR927 AOI03)</option>
+        <option value="84.931,27.783,85.119,27.877|2026-08-25T22">Trishuli GLOF · Phosretar (EMSR927 AOI05)</option>
+      </select>
+    </div>
+    <div class="bbox" id="bboxTxt">No area yet: draw a box or pick an example.</div>
+    <button id="runBtn" class="primary" disabled>Map the flood</button>
+    <div class="progress" id="progress" hidden><div class="bar"><i></i></div><span></span></div>
+    <div id="pastRuns"></div>
+  </section>
+
+  <section class="card" id="results" hidden>
+    <h3>2 · Situation</h3>
+    <div class="tiles" id="tiles"></div>
+    <div class="tabs" role="tablist">
+      <button role="tab" data-tab="cut" aria-selected="true">Cut off</button>
+      <button role="tab" data-tab="bridges">Bridges</button>
+      <button role="tab" data-tab="ask">Ask</button>
+      <button role="tab" data-tab="report">Report</button>
+      <button role="tab" data-tab="basis">Basis</button>
+    </div>
+    <div class="tab" id="tab-cut"></div>
+    <div class="tab" id="tab-bridges" hidden></div>
+    <div class="tab" id="tab-ask" hidden>
+      <div class="chat" id="chat"></div>
+      <div class="suggest" id="suggest">
+        <button>Which villages are cut off?</button>
+        <button>Which bridges are damaged?</button>
+        <button>कुन कुन गाउँ सम्पर्कविहीन छन्?</button>
+        <button>Write a 5-line situation report.</button>
+      </div>
+      <form id="askForm"><input id="askIn" placeholder="Ask in English or नेपाली…" autocomplete="off"><button>Send</button></form>
+    </div>
+    <div class="tab" id="tab-report" hidden>
+      <p>One-page situation report generated from the map results (every number comes from the system).</p>
+      <div class="row"><a id="repEn" target="_blank" class="btn">Open · English</a><a id="repNe" target="_blank" class="btn">खोल्नुहोस् · नेपाली</a></div>
+      <h4>Flood path (bonus)</h4>
+      <p>Click <b>Trace flood path</b>, then click any point upstream on the map. The path follows the Copernicus DEM down the valley and lists settlements along it.</p>
+      <button id="traceBtn" class="ghost">⤵ Trace flood path</button>
+      <div id="traceOut"></div>
+    </div>
+    <div class="tab" id="tab-basis" hidden></div>
+  </section>
+  <footer class="attrib">Contains modified Copernicus Sentinel data 2026 · Copernicus WorldDEM-30 © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018, provided under COPERNICUS by the EU and ESA · © OpenStreetMap contributors. Educational prototype, not an operational tool.</footer>
+</aside>
+<script src="app.js"></script>
+</body>
+</html>

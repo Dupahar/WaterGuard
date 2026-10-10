@@ -1,0 +1,168 @@
+{
+ "summary": {
+  "questions": 13,
+  "answers_fully_verified": 13,
+  "needed_retry": 0,
+  "numbers_total": 106
+ },
+ "items": [
+  {
+   "q": "Which villages are cut off?",
+   "answer": "Two villages are completely cut off by road: an unnamed cluster with 36 buildings and another unnamed cluster with 33 buildings. An estimated 301 people are stranded in these villages. Additionally, Syabru Bensi, a suburb with 404 buildings, has lost 68% of its road connections, stranding an estimated 1,200 people.",
+   "backend": "bedrock",
+   "tools": [
+    "list_cut_off"
+   ],
+   "numbers": 6,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 5.4
+  },
+  {
+   "q": "How many people are cut off and how did you estimate it?",
+   "answer": "An estimated 1,523 people are cut off by road. This number is derived by multiplying the number of buildings in each cut-off settlement by the average household size of 4.37 persons per household, based on the Nepal census 2021. The settlements include Syabru Bensi, unnamed clusters, and a hamlet, with varying degrees of road loss.",
+   "backend": "bedrock",
+   "tools": [
+    "list_cut_off"
+   ],
+   "numbers": 3,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 3.3
+  },
+  {
+   "q": "Which bridges are likely damaged? Give coordinates.",
+   "answer": "There are 8 bridges likely damaged. Here are their names and coordinates:\n\n- Bridge near Pajung (1.6 km): 85.34352, 28.18258\n- Bridge near Syabru Bensi (0.8 km): 85.33252, 28.15739\n- Bridge near Pajung (1.6 km): 85.34354, 28.18231\n- Bridge near Syabru Bensi (0.6 km): 85.34273, 28.16587\n- Bridge near Pajung (1.5 km): 85.3422, 28.1816\n- Bridge near Syabru Bensi (0.3 km): 85.33998, 28.16423\n- Bridge near Brabal (2.2 km): 85.31769, 28.14741\n- Bridge near Syabru Bensi (0.6 km): 85.34373, 28.1635\n\nThese bridges are likely damaged based on satellite analysis.",
+   "backend": "bedrock",
+   "tools": [
+    "damaged_bridges"
+   ],
+   "numbers": 25,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 4.5
+  },
+  {
+   "q": "What is the status of Syabru Bensi?",
+   "answer": "Syabru Bensi has 404 buildings with an estimated population of 1,765. It is partly cut off by road, with 68% of its buildings losing every road link. It has also lost access to health facilities on foot. The coordinates are 85.33725, 28.16367.",
+   "backend": "bedrock",
+   "tools": [
+    "find_settlement"
+   ],
+   "numbers": 5,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 3.1
+  },
+  {
+   "q": "Is any health facility affected?",
+   "answer": "Based on the retrieved information, there is 1 health facility in the area, but none are affected.",
+   "backend": "bedrock",
+   "tools": [
+    "health_facilities"
+   ],
+   "numbers": 1,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 2.7
+  },
+  {
+   "q": "How much road is inside the impact zone?",
+   "answer": "There are 11.11 kilometers of road inside the impact zone. This information is derived from the satellite analysis of the area.",
+   "backend": "bedrock",
+   "tools": [
+    "get_overview"
+   ],
+   "numbers": 1,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 2.7
+  },
+  {
+   "q": "Write a 5-line situation report for the district emergency operations centre.",
+   "answer": "Here is the situation report for the district emergency operations centre:\n\n- The flood event occurred on 2026-08-25 at 22:00 UTC.\n- The impact area covers 173.5 hectares, with 225 buildings likely affected, impacting an estimated 983 people.\n- 8 bridges are likely damaged, and 2 settlements are completely cut off by vehicle, affecting an estimated 301 people.\n- 11.11 km of roads are within the impact area.\n- Satellite images used for analysis include Sentinel-1 and Sentinel-2 data from various dates post-event.",
+   "backend": "bedrock",
+   "tools": [
+    "get_overview"
+   ],
+   "numbers": 14,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 3.5
+  },
+  {
+   "q": "Which satellite images was this based on?",
+   "answer": "The analysis was based on the following satellite images:\n- Sentinel-1 post-event images from August 28, 2026, at 12:21 UTC and September 5, 2026, at 00:18 UTC.\n- Sentinel-2 post-event images from August 27, 2026, September 1, 2026, September 6, 2026, September 21, 2026, October 1, 2026, and October 3, 2026.\n- OpenStreetMap snapshot from August 24, 2026, at 22:00 UTC.",
+   "backend": "bedrock",
+   "tools": [
+    "get_overview"
+   ],
+   "numbers": 26,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 3.8
+  },
+  {
+   "q": "How many people died?",
+   "answer": "I do not have information about the number of people who died. I can only provide details about the flood impact based on satellite analysis. If you need information about casualties, you may need to contact local authorities or news sources.",
+   "backend": "bedrock",
+   "tools": [],
+   "numbers": 0,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 1.9
+  },
+  {
+   "q": "कुन कुन गाउँ सम्पर्कविहीन छन्?",
+   "answer": "सम्पर्कविहीन गाउँहरूको सूची यसप्रकार छ:\n- स्याप्रु बेसी: अनुमानित १२०० मानिसहरू\n- अज्ञात गाउँ (३६ घरहरू): अनुमानित १५७ मानिसहरू\n- अज्ञात गाउँ (३३ घरहरू): अनुमानित १४४ मानिसहरू\n\nयो सूची सबै सडक सम्पर्क गुमाउनु भएका गाउँहरू हो।",
+   "backend": "bedrock",
+   "tools": [
+    "list_cut_off"
+   ],
+   "numbers": 5,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 3.7
+  },
+  {
+   "q": "कति वटा पुल भत्किए?",
+   "answer": "८ वटा पुलहरू सम्भावित रूपमा भत्किएको अनुमान गरिएको छ। यो पुलहरू पाजुङ, स्याप्रु बेसी र ब्राबल नजिकै रहेका छन्।",
+   "backend": "bedrock",
+   "tools": [
+    "damaged_bridges"
+   ],
+   "numbers": 1,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 3.0
+  },
+  {
+   "q": "स्याब्रुबेसीको अवस्था के छ?",
+   "answer": "स्याप्रु बेसीको अवस्था यस प्रकार छ:\n- नाम: स्याप्रु बेसी\n- प्रकार: उपनगर\n- भवनहरू: ४०४\n- अनुमानित मानिसहरू: १७६५\n- सडक अवस्था: आंशिक रूपमा काटेको\n- सडक मार्गहरू: ६८% भवनहरूले सबै सडक सम्पर्क गुमाए\n- स्वास्थ्य सुविधा सम्पर्क: पैदल मार्गले स्वास्थ्य सुविधा सम्पर्क गुमायो\n\nस्याप्रु बेसीमा राहत र उद्धार कार्यको लागि तत्काल आवश्यकता छ।",
+   "backend": "bedrock",
+   "tools": [
+    "find_settlement",
+    "find_settlement"
+   ],
+   "numbers": 3,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 5.2
+  },
+  {
+   "q": "जिल्ला आपतकालीन कार्य सञ्चालन केन्द्रका लागि छोटो स्थिति प्रतिवेदन लेख्नुहोस्।",
+   "answer": "जिल्ला आपतकालीन कार्य सञ्चालन केन्द्रका लागि अद्यतन स्थिति प्रतिवेदन:\n\n- सम्भावित कटिएका बसाइँहरू: \n  - अज्ञात नामको बसाइँ (३६ भवनहरू), अनुमानित फसेका मानिसहरू: १५७\n  - अज्ञात नामको बसाइँ (३३ भवनहरू), अनुमानित फसेका मानिसहरू: १४४\n- आंशिक कटिएको बसाइँ: \n  - स्याप्रु बेसी, अनुमानित फसेका मानिसहरू: १२००\n- सम्भावित क्षतिग्रस्त पुलहरू: ८\n  - पाजुङ नजिकको पुल (१.६ किमी)\n  - स्याप्रु बेसी नजिकको पुल (०.८ किमी)\n  - पाजुङ नजिकको पुल (१.६ किमी)\n  - स्याप्रु बेसी नजिकको पुल (०.६ किमी)\n  - पाजुङ नजिकको पुल (१.५ किमी)\n  - स्याप्रु बेसी नजिकको पुल (०.३ किमी)\n  - ब्राबल नजिकको पुल (२.२ किमी)\n  - स्याप्रु बेसी नजिकको पुल (०.६ किमी)\n- क्षेत्रमा रहेका स्वास्थ्य सुविधाहरू: १, प्रभावित: ०\n\nअर्को कार्य:\n- सम्भावित कटिएका बसाइँहरूको सूची प्राप्त गर्नुहोस्।\n- सम्भावित क्षतिग्रस्त पुलहरूको विवरण प्राप्त गर्नुहोस्।\n- स्वास्थ्य सुविधाहरूको स्थिति जाँच गर्नुहोस्।",
+   "backend": "bedrock",
+   "tools": [
+    "get_overview",
+    "list_cut_off",
+    "damaged_bridges",
+    "health_facilities"
+   ],
+   "numbers": 16,
+   "unverified_final": [],
+   "retried": false,
+   "seconds": 8.6
+  }
+ ]
+}

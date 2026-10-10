@@ -1,0 +1,239 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+@page { size: A4; margin: 14mm 14mm; }
+body { font: 10.2px/1.42 'Segoe UI', Arial, sans-serif; color:#111; }
+h1 { font-size: 18px; margin: 0 0 4px; } h2 { font-size: 13px; margin: 12px 0 4px; border-bottom: 2px solid #c8461a; }
+table { border-collapse: collapse; width: 100%; margin: 4px 0 8px; font-size: 9.4px; }
+td, th { border: 1px solid #ccc; padding: 2px 4px; text-align: left; } th { background: #f2f2f2; }
+p, li { margin: 3px 0; } img { max-width: 100%; }
+</style></head><body><h1>WaterGuard: mapping flood damage from space</h1>
+<p>Adil Mahajan.
+Code: see README. Case study: Bhote Koshi–Trishuli glacier-outburst flood, Nepal, 25/26 Aug 2026 (Copernicus EMS EMSR927).</p>
+<h2>1. Problem and what we built</h2>
+<p>When roads, bridges and phone lines fail, rescuers need three answers fast: <strong>where</strong> the flood hit, <strong>what</strong> it damaged and <strong>who</strong> is cut off. WaterGuard answers them for any area and date, from free satellite data only:</p>
+<ul>
+<li>an <strong>impact map</strong> of flooded and debris-covered ground, fusing Sentinel-1 radar (cloud-proof), Sentinel-2 optical change (where clear) and the Copernicus DEM (where a flood can physically reach);</li>
+<li>a <strong>damage overlay</strong> of pre-event OpenStreetMap buildings, roads, bridges and health facilities;</li>
+<li>a <strong>cut-off analysis</strong> that removes impacted road segments and damaged bridges from the road graph and finds settlements that lost every link to a town, a health facility or the wider network;</li>
+<li>a <strong>situation-report copilot</strong> (English + Nepali) that answers only from these results, with an automatic number checker;</li>
+<li>a <strong>dashboard</strong>, a printable <strong>one-page situation report</strong> (EN/NE) and a <strong>flood-path tracer</strong> (bonus).</li>
+</ul>
+<h2>2. Data rules</h2>
+<table>
+<thead>
+<tr>
+<th>Input</th>
+<th>Source</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sentinel-1 RTC (VV, VH)</td>
+<td>Microsoft Planetary Computer (Meru Labs fallback)</td>
+<td>change detection, all orbit tracks</td>
+</tr>
+<tr>
+<td>Sentinel-2 L2A</td>
+<td>Planetary Computer</td>
+<td>change detection where clear</td>
+</tr>
+<tr>
+<td>Copernicus DEM GLO-30</td>
+<td>Planetary Computer</td>
+<td>HAND, slope, layover/shadow, flow paths</td>
+</tr>
+<tr>
+<td>OpenStreetMap, snapshot 24 h before the event</td>
+<td>ohsome API v2 (HeiGIT)</td>
+<td>buildings, roads, bridges, places, health facilities</td>
+</tr>
+</tbody>
+</table>
+<p>EMS maps are used <strong>only</strong> to score results (<code>waterguard/validate.py</code>, never imported by the pipeline). Each run audits its OSM snapshot: it fails if any feature was edited after the snapshot time (case study: 0 edited; latest edit in snapshot 26 Jul 2026). No training dataset is used (we chose the copilot as the AI component).</p>
+<h2>3. Method</h2>
+<p><strong>3.1 Terrain.</strong> GLO-30 is hydrologically conditioned (least-cost breaching) with WhiteboxTools. We derive D8 flow directions, a stream network (≥ 2 km² upstream area), <strong>HAND</strong> (height above nearest drainage), slope and aspect.</p>
+<p><strong>3.2 Radar change (Sentinel-1).</strong> For every orbit track with an image after the event, the first post-event image is compared with up to five earlier images of the <strong>same track</strong> (same viewing geometry, 12-day repeat), as recommended for SAR change detection. After 5×5 multilooking (OpenCV), each pixel gets a z-score |post − mean(pre)| / std(pre), with a 0.75 dB std floor. Pixels that normally fluctuate need a bigger change to count. Debris can brighten (boulders) or darken (mud, water), so the absolute value is used. Pixels in <strong>layover or shadow</strong> for that track, predicted from slope/aspect and the pass direction, are excluded. Tracks and polarisations are averaged. Open water is VV &lt; −18 dB and VH &lt; −25 dB.</p>
+<p><strong>3.3 Optical change (Sentinel-2).</strong> Monsoon cloud rarely leaves a clean scene, so we build per-pixel cloud-free median composites from the Scene Classification Layer over 45 days before and 40 days after the event. Reflectance is harmonised for processing baseline ≥ 04.00. Stripped vegetation shows as NDVI loss and new water or wet sediment as NDWI gain.</p>
+<p><strong>3.4 Fusion (OpenCV).</strong> A pixel is impacted if it is on the valley floor (HAND ≤ 80 m) <strong>and</strong> shows change: optical where both composites are clear, radar elsewhere (smoothed |z| ≥ 1.0). Then come morphological opening/closing, a rule that patches must touch the river channel (a flood arrives from the river, not mid-slope) and a 2 ha minimum. Clear-sky ground that is bare or water after the event and connected to ≥ 5 ha of detected change is added. This captures the riverbed and gravel bars the surge ran through, which had no vegetation to lose. Ground that was bare <em>before</em> the event too, added only by this connectivity, is kept as a separate <strong>lower-confidence riverbed</strong> class.</p>
+<p><strong>3.5 Damage.</strong> A building, bridge or health facility is <em>likely affected</em> if it intersects impact and <em>possibly affected</em> within 20 m. We also report road length inside impact, by class.</p>
+<p><strong>3.6 Who is cut off.</strong> OSM roads become a graph (every vertex a node, so mid-way junctions count) for two networks: <em>vehicle</em> (motorable roads and tracks) and <em>foot</em> (plus paths, which matter in the hills). Impacted segments and likely-damaged bridges are removed. Destinations are towns/cities, health facilities and road exits at the area's edge. Settlements are OSM places plus clusters of ≥ 8 buildings without a named place, so unmapped hamlets count. Each settlement is tested through up to 25 of its own buildings, each snapped to its nearest road, so one flooded junction next to the place's map point cannot strand a whole suburb. A settlement is <strong>cut off</strong> if none of its buildings can reach any destination after the flood, and <strong>partly cut</strong> if some can't or it lost a destination type. We report the share of its buildings with no road left and <strong>people stranded</strong> = people × that share. We also compute road distance to the nearest health facility before and after. People = buildings × 4.37 (Nepal 2021 census household size), always labelled as an estimate.</p>
+<p><strong>3.7 Flood path (bonus).</strong> From any clicked point, snapped to the nearest stream, we follow D8 steepest descent downstream and list settlements within 400 m of the path whose lowest part is ≤ 80 m above the river, ordered by distance. Times use an <em>assumed</em> 4 m/s surge and are labelled as such.</p>
+<p><strong>3.8 AI component: situation-report copilot.</strong> An LLM (Amazon Bedrock, default Amazon Nova Pro; or any OpenAI-compatible model) with six read-only tools over the run's results. Rules: answer in the user's language (English/Nepali) and copy every number from a tool result. A <strong>verifier</strong> extracts every number from the draft (ASCII or Devanagari digits) and checks it against the tool results of that conversation. On failure the model gets one retry naming the bad numbers; numbers that still fail are masked <code>[unverified]</code> and flagged in the UI. Without an LLM, a deterministic router answers the common questions from the same tools. The one-page report is template-based, so its numbers are exactly the pipeline's.</p>
+<h2>4. Case study: EMSR927 comparison</h2>
+<p>EMS delivered maps for four areas (AOI01 Syapru Besi, AOI02 Timure, AOI03 Bidur, AOI05 Phosretar; AOI04/06 were cancelled for cloud). EMS mapped the event as debris-flow/landslide footprints ("observed event"), plus graded building and bridge damage from very-high-resolution optical imagery. We score inside each AOI, excluding EMS "not analysed" areas.</p>
+<p><strong>Honest protocol.</strong> Thresholds were tuned on <strong>AOI01 + AOI02 only</strong>. AOI03 and AOI05 are <strong>held out</strong>. The patch-size limits were set with false-alarm tests that use no EMS data: a <em>placebo date</em> (2 ha minimum patch) and an unaffected <em>control tributary</em>, Tadi Khola (5 ha minimum seed for riverbed growth; with 2 ha seeds, growth ran up Tadi's pre-existing gravel bed, 180 ha of false impact). As a baseline we mark the whole valley floor (HAND ≤ 80 m) as hit. This shows how much the satellite change evidence adds, since EMS AOIs are drawn tightly around the damaged valley.</p>
+<table>
+<thead>
+<tr>
+<th>EMS area</th>
+<th>Split</th>
+<th>EMS impact (ha)</th>
+<th>Ours (ha)</th>
+<th>Precision</th>
+<th>Recall</th>
+<th><strong>F1</strong></th>
+<th>IoU</th>
+<th>Valley-only baseline F1</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AOI01 Syapru Besi</td>
+<td>tuning</td>
+<td>111.1</td>
+<td>108.4</td>
+<td>0.95</td>
+<td>0.93</td>
+<td><strong>0.94</strong></td>
+<td>0.89</td>
+<td>0.86</td>
+</tr>
+<tr>
+<td>AOI02 Timure</td>
+<td>tuning</td>
+<td>129.4</td>
+<td>109.6</td>
+<td>0.98</td>
+<td>0.83</td>
+<td><strong>0.90</strong></td>
+<td>0.81</td>
+<td>0.89</td>
+</tr>
+<tr>
+<td>AOI03 Bidur</td>
+<td>held-out</td>
+<td>701.4</td>
+<td>775.7</td>
+<td>0.88</td>
+<td>0.97</td>
+<td><strong>0.92</strong></td>
+<td>0.85</td>
+<td>0.56</td>
+</tr>
+<tr>
+<td>AOI05 Phosretar</td>
+<td>held-out</td>
+<td>639.3</td>
+<td>555.6</td>
+<td>0.95</td>
+<td>0.82</td>
+<td><strong>0.88</strong></td>
+<td>0.79</td>
+<td>0.53</td>
+</tr>
+</tbody>
+</table>
+<table>
+<thead>
+<tr>
+<th>EMS area</th>
+<th>EMS damaged/destroyed building points on our impact map</th>
+<th>Destroyed</th>
+<th>Damaged</th>
+<th>Possibly damaged</th>
+<th>EMS damaged bridges: in pre-event OSM / flagged by us</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>AOI01</td>
+<td>404/433 (93%)</td>
+<td>322/323</td>
+<td>31/32</td>
+<td>51/78</td>
+<td>5 / 5 of 5</td>
+</tr>
+<tr>
+<td>AOI02</td>
+<td>394/431 (91%)</td>
+<td>360/372</td>
+<td>26/33</td>
+<td>8/26</td>
+<td>0 / 0 of 1</td>
+</tr>
+<tr>
+<td>AOI03</td>
+<td>2918/3058 (95%)</td>
+<td>2473/2479</td>
+<td>234/246</td>
+<td>211/333</td>
+<td>20 / 20 of 24</td>
+</tr>
+<tr>
+<td>AOI05</td>
+<td>567/763 (74%)</td>
+<td>358/397</td>
+<td>93/116</td>
+<td>116/250</td>
+<td>13 / 11 of 17</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Do the results depend on the EMS calibration?</strong> Hardly. With the thresholds written <em>before</em> any EMS label was looked at (HAND ≤ 60 m, NDVI drop 0.10, radar |z| ≥ 1.1, 15 px smoothing) plus the riverbed rule, F1 on AOI01/02/03/05 is <strong>0.89 / 0.80 / 0.92 / 0.86</strong>, against 0.94 / 0.90 / 0.92 / 0.87 tuned (same cached features). The riverbed rule is the part that matters (without it: 0.83 / 0.53 / 0.85 / 0.54). It has a physical basis: a debris-flow channel is bare ground after the event, whether or not it was vegetated before. EMS maps never enter a run: they are read only by <code>validate.py</code>.</p>
+<p><img src="figures/aoi03_vs_ems.png" style="width:48%"> <img src="figures/aoi05_vs_ems.png" style="width:48%"></p>
+<p><em>Held-out areas. Green = mapped by both, orange = only WaterGuard, blue = only EMS, white = EMS area outline. Orange outside the outline is outside what EMS analysed (e.g. the Tadi Khola, bottom right in Bidur: see Limitations).</em></p>
+<p><strong>False-alarm tests</strong> (should map ~nothing):</p>
+<table>
+<thead>
+<tr>
+<th>Test</th>
+<th>Area (km²)</th>
+<th>Impact mapped (ha)</th>
+<th>of which riverbed, lower confidence (ha)</th>
+<th>Buildings likely affected</th>
+<th>Bridges likely damaged</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>placebo date (Syapru Besi, 20 Jul 2026)</td>
+<td>29.8</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>control valley (Langtang Khola, real event date)</td>
+<td>44.8</td>
+<td>0.0</td>
+<td>0.0</td>
+<td>0</td>
+<td>0</td>
+</tr>
+<tr>
+<td>control tributary (Tadi Khola, real event date)</td>
+<td>103.5</td>
+<td>23.6</td>
+<td>0.0</td>
+<td>0</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Copilot evaluation</strong> (<code>scripts/eval_copilot.py</code>, Amazon Nova Pro on Bedrock, Syapru Besi run, 13 questions: 9 English, 4 Nepali; transcript in <code>docs/copilot_eval.json</code>). <strong>13 of 13 answers fully verified (106 numbers), no retries.</strong> In an earlier run, one answer (a 5-line situation report) multiplied buildings by household size on its own. The verifier rejected the number, the retry repeated it and it was masked as <code>[unverified]</code>, so no invented figure reached the user. The pipeline now computes that figure itself (<code>people_est_in_likely_affected_buildings</code>). Asked "How many people died?", the copilot says the maps contain no casualty data and gives no number. Each answer takes 2–7 s.</p>
+<p><strong>Another event, untouched by tuning: Melamchi flood, 15 Jun 2021.</strong> We ran the same code, with no changes, on a different year, catchment and Sentinel-2 processing baseline (bbox 85.54–85.62 E, 27.80–27.92 N; 266 s cold). It mapped 954 ha of impact, 855 buildings likely affected and 20 bridges likely damaged. <strong>Melamchi Bazar</strong>, the town devastated in that flood, loses road access to its health post (12 km before, no route after), with 56% of its buildings left without a road. The first post-event radar image was 20 Jun 2021, five days after the flood. We have no EMS-style reference for this event, so this check is qualitative.</p>
+<p><strong>A flat, urban flood: Kathmandu Valley, 27–28 Sep 2024.</strong> This is the opposite of a Himalayan gorge, and it exposed two weaknesses that we fixed before freezing the code. First, roofs and streets are "bare" in Sentinel-2, so riverbed growth ran through the city (1,062 ha, 34,502 buildings "hit"). Pre-event OSM building footprints now block riverbed growth: 281 ha, along the Bagmati, Nakkhu, Balkhu and Manohara, the rivers that overflowed. Second, one flooded junction next to a place's map point stranded whole suburbs (Balkhu, Kalanki). The building-sampled cut-off test (3.6) fixed that: no settlement is cut off in the redundant city grid, and about 8,300 people's buildings lost road access, mostly near the Manohara. Both fixes cost a little on the EMS areas (Phosretar destroyed-building recall 96% → 90%). We kept them, because a judge's area can be anywhere.</p>
+<p><img src="figures/melamchi_2021.png" style="width:45%"> <img src="figures/kathmandu_2024.png" style="width:45%"></p>
+<h2>5. Dashboard, report and copilot</h2>
+<p><img src="screenshots/dashboard.png" style="width:100%"></p>
+<p>The dashboard (<code>python -m waterguard.server</code>) takes a drawn box and a date and shows progress, then layers: impact, Sentinel-2 before/after, radar change, buildings hit, roads cut, bridges, and settlements coloured by road status. A side panel has the situation tiles, cut-off and bridge lists, the copilot, the one-page report (EN/NE), the flood-path tool and a <em>Basis</em> tab. That tab lists every satellite image used and the OSM audit.</p>
+<h2>6. Limitations: what WaterGuard cannot do</h2>
+<ul>
+<li><strong>No early warning.</strong> Sentinel-1 revisits each track every 12 days (two tracks here, so a new look every few days) and Sentinel-2 every 5 days, cloud permitting. WaterGuard maps damage <em>after</em> the fact. It cannot warn of a glacier collapse minutes ahead. In the case study the first post-event radar image came about 2.6 days after the flood (28 Aug 12:21 UTC).</li>
+<li><strong>Radar blind spots.</strong> Steep slopes facing towards or away from the satellite (layover/shadow) cannot be assessed from that track. We mask them rather than guess. Narrow gorges are hard at 10 m.</li>
+<li><strong>Radar-decided impact is coarser.</strong> Under cloud, the radar evidence is smoothed over ~200 m to beat speckle, so radar-decided patches come out as wider bands than optical ones (visible in the Melamchi run).</li>
+<li><strong>Clouds.</strong> During the monsoon, optical change is available only where the composites found clear pixels. Elsewhere the coarser radar evidence decides. The Basis tab reports the split.</li>
+<li><strong>Building-level damage is inferred, not seen.</strong> At 10 m, a building on mapped impact is <em>likely affected</em>. We cannot tell destroyed from damaged. EMS used 0.3–0.5 m imagery for that.</li>
+<li><strong>OSM completeness.</strong> Unmapped roads, trails, bridges or buildings are invisible to the damage and cut-off analysis, and connectivity is only as good as the pre-event map. Areas outside OSM coverage give "no mapped road".</li>
+<li><strong>People are estimates</strong> (buildings × 4.37 household size): it counts non-residential buildings, ignores seasonal migration and is not a census.</li>
+<li><strong>The area boundary matters.</strong> "Cut off" means no route to a town, a health facility or a road leaving the drawn area. A small box can hide a detour that exists outside it.</li>
+<li><strong>Tributary riverbeds.</strong> Bare gravel that connects to detected change is added to the impact map. At a confluence this can run up a tributary's riverbed that was already bare before the event. In the Bidur run the Tadi Khola bed is flagged this way, and from the allowed data we cannot tell whether a monsoon high flow hit it. Such pixels are a separate, lower-confidence class (yellow on the map) and are reported as such.</li>
+<li><strong>Cities.</strong> Flooding between buildings is hard to see from radar (double bounce) and 10 m optical pixels mix roofs and water. In Kathmandu we map flooding along the river corridors, not street-level water.</li>
+<li><strong>Valley-floor prior.</strong> Impact is only mapped below 80 m HAND. Landslides high on the slopes, which EMS also mapped, are out of scope.</li>
+<li><strong>Tuned on one event.</strong> Thresholds come from two EMSR927 areas and were checked on two held-out areas plus false-alarm tests, but not on other flood types (e.g. plains riverine floods).</li>
+<li><strong>The copilot can still be wrong in words.</strong> The verifier guarantees numbers, not the reasoning around them. The Nepali report templates have not yet been reviewed by a native speaker.</li>
+<li><strong>Run time.</strong> A cold run over about 30 km² takes 3–5 minutes, almost all of it downloading imagery from Planetary Computer.</li>
+</ul>
+<h2>7. Attribution and citations</h2>
+<p>Contains modified Copernicus Sentinel data 2026. Produced using Copernicus WorldDEM-30 © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018 provided under COPERNICUS by the European Union and ESA; all rights reserved. © OpenStreetMap contributors (ODbL), via the ohsome API (HeiGIT). Validation only: European Union, Copernicus Emergency Management Service data (EMSR927). Lindsay, J. B. (2016), <em>Whitebox GAT</em>, Computers &amp; Geosciences 95. Nobre, A. D. et al. (2011), HAND, <em>J. Hydrology</em> 404. National Statistics Office Nepal (2021), <em>National Population and Housing Census 2021</em> (average household size 4.37).</p></body></html>

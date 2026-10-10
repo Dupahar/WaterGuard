@@ -1,0 +1,173 @@
+[
+ {
+  "aoi": 1,
+  "name": "Syapru Besi",
+  "split": "tuning",
+  "ref_ha": 111.1,
+  "ours_ha": 108.4,
+  "area": {
+   "precision": 0.951,
+   "recall": 0.928,
+   "f1": 0.939,
+   "iou": 0.885
+  },
+  "valley_baseline": {
+   "precision": 0.765,
+   "recall": 0.982,
+   "f1": 0.86,
+   "iou": 0.754
+  },
+  "buildings": {
+   "ems_damaged_points": 433,
+   "on_our_impact_map": 404,
+   "recall": 0.933,
+   "by_grade": {
+    "Destroyed": "322/323",
+    "Damaged": "31/32",
+    "Possibly damaged": "51/78"
+   }
+  },
+  "bridges": {
+   "ems_damaged_bridges": 5,
+   "in_pre_event_osm": 5,
+   "flagged_by_us": 5
+  },
+  "run_id": "e34c30aded"
+ },
+ {
+  "aoi": 2,
+  "name": "Timure",
+  "split": "tuning",
+  "ref_ha": 129.4,
+  "ours_ha": 109.6,
+  "area": {
+   "precision": 0.976,
+   "recall": 0.827,
+   "f1": 0.895,
+   "iou": 0.81
+  },
+  "valley_baseline": {
+   "precision": 0.854,
+   "recall": 0.926,
+   "f1": 0.889,
+   "iou": 0.799
+  },
+  "buildings": {
+   "ems_damaged_points": 431,
+   "on_our_impact_map": 394,
+   "recall": 0.914,
+   "by_grade": {
+    "Destroyed": "360/372",
+    "Damaged": "26/33",
+    "Possibly damaged": "8/26"
+   }
+  },
+  "bridges": {
+   "ems_damaged_bridges": 1,
+   "in_pre_event_osm": 0,
+   "flagged_by_us": 0
+  },
+  "run_id": "c0f3b91a49"
+ },
+ {
+  "aoi": 3,
+  "name": "Bidur",
+  "split": "held-out",
+  "ref_ha": 701.4,
+  "ours_ha": 775.7,
+  "area": {
+   "precision": 0.875,
+   "recall": 0.967,
+   "f1": 0.919,
+   "iou": 0.85
+  },
+  "valley_baseline": {
+   "precision": 0.393,
+   "recall": 1.0,
+   "f1": 0.564,
+   "iou": 0.393
+  },
+  "buildings": {
+   "ems_damaged_points": 3058,
+   "on_our_impact_map": 2918,
+   "recall": 0.954,
+   "by_grade": {
+    "Destroyed": "2473/2479",
+    "Damaged": "234/246",
+    "Possibly damaged": "211/333"
+   }
+  },
+  "bridges": {
+   "ems_damaged_bridges": 24,
+   "in_pre_event_osm": 20,
+   "flagged_by_us": 20
+  },
+  "run_id": "58052edd5e"
+ },
+ {
+  "aoi": 5,
+  "name": "Phosretar",
+  "split": "held-out",
+  "ref_ha": 639.3,
+  "ours_ha": 555.6,
+  "area": {
+   "precision": 0.947,
+   "recall": 0.823,
+   "f1": 0.881,
+   "iou": 0.787
+  },
+  "valley_baseline": {
+   "precision": 0.356,
+   "recall": 1.0,
+   "f1": 0.525,
+   "iou": 0.356
+  },
+  "buildings": {
+   "ems_damaged_points": 763,
+   "on_our_impact_map": 567,
+   "recall": 0.743,
+   "by_grade": {
+    "Destroyed": "358/397",
+    "Damaged": "93/116",
+    "Possibly damaged": "116/250"
+   }
+  },
+  "bridges": {
+   "ems_damaged_bridges": 17,
+   "in_pre_event_osm": 13,
+   "flagged_by_us": 11
+  },
+  "run_id": "d6577ed7f1"
+ },
+ {
+  "false_alarm_tests": [
+   {
+    "test": "placebo date (Syapru Besi, 20 Jul 2026)",
+    "area_km2": 29.8,
+    "impact_ha": 0.0,
+    "of_which_riverbed_lower_confidence_ha": 0.0,
+    "buildings_likely_affected": 0,
+    "bridges_likely_damaged": 0,
+    "run_id": "862161d974"
+   },
+   {
+    "test": "control valley (Langtang Khola, real event date)",
+    "area_km2": 44.8,
+    "impact_ha": 0.0,
+    "of_which_riverbed_lower_confidence_ha": 0.0,
+    "buildings_likely_affected": 0,
+    "bridges_likely_damaged": 0,
+    "run_id": "d8c264ca65"
+   },
+   {
+    "test": "control tributary (Tadi Khola, real event date)",
+    "area_km2": 103.5,
+    "impact_ha": 23.6,
+    "of_which_riverbed_lower_confidence_ha": 0.0,
+    "buildings_likely_affected": 0,
+    "bridges_likely_damaged": 0,
+    "run_id": "4315f59d37"
+   }
+  ]
+ }
+]
