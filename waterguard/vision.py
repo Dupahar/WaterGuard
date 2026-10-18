@@ -286,8 +286,9 @@ def chip(path, pre_rgb, post_rgb, dE, M, Rf, core, m, ok_pre, ok_post, scale=4):
         cv2.drawContours(p, outline, -1, (255, 60, 30) if i < 2 else (255, 255, 255), 2, cv2.LINE_AA)
         sh = m.get("coreg_shift_px")
         label = ["BEFORE", f"AFTER{f' (aligned {sh:.2f} px)' if sh else ''}", "COLOUR CHANGE dE"][i]
-        cv2.putText(p, label, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 0), 4, cv2.LINE_AA)
-        cv2.putText(p, label, (8, 22), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
+        (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.6, 1)
+        cv2.rectangle(p, (0, 0), (tw + 16, th + 14), (20, 20, 20), -1)
+        cv2.putText(p, label, (8, th + 7), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 1, cv2.LINE_AA)
         panels[i] = p
     img = cv2.hconcat(panels)
     cv2.imwrite(str(path), cv2.cvtColor(img, cv2.COLOR_RGB2BGR))

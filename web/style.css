@@ -88,6 +88,18 @@ select { flex: 1; min-width: 0; }
 .cells .acts { display: flex; gap: 6px; margin-top: 6px; }
 .cells .acts button { flex: 1; border-radius: 8px; padding: 5px; border: 1px solid var(--line); background: none; }
 .cells .acts .keep { border-color: var(--good); } .cells .acts .remove { border-color: var(--critical); }
+.lightbox { position: fixed; inset: 0; background: #000c; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 24px; }
+.lb-card { background: var(--surface-2); border: 1px solid var(--line); border-radius: var(--radius); max-width: min(1500px, 96vw); max-height: 94vh; overflow: auto; padding: 14px 16px; position: relative; }
+.lb-card img { width: 100%; border-radius: 8px; display: block; margin: 8px 0; }
+.lb-card h3 { margin: 0 32px 6px 0; font-size: 15px; }
+.lb-card .why { color: var(--text-secondary); font-size: 13px; }
+.lb-card .trace { color: var(--text-muted); font: 12px/1.5 ui-monospace, monospace; white-space: pre-wrap; }
+.lb-card .acts { display: flex; gap: 8px; margin-top: 10px; }
+.lb-card .acts button { flex: 1; padding: 9px; border-radius: 8px; background: none; border: 1px solid var(--line); font-weight: 600; }
+.lb-card .acts .keep { border-color: var(--good); } .lb-card .acts .remove { border-color: var(--critical); }
+.lb-close { position: absolute; top: 8px; right: 10px; background: none; border: 0; font-size: 18px; color: var(--text-secondary); }
+.maplibregl-popup-content { color: #111; }
+.maplibregl-popup-content img { width: 320px; display: block; margin-top: 6px; border-radius: 4px; }
 .vlog { font: 12px/1.6 ui-monospace, monospace; color: var(--text-secondary); margin: 8px 0; white-space: pre-wrap; }
 .basis a { color: var(--accent); }
 .pill.ok { background: var(--good); }

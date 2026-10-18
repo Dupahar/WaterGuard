@@ -97,7 +97,7 @@ const LAYERS = [
   { id: "bridges", label: "Bridges", on: true },
   { id: "settlements", label: "Settlements", on: true },
 ];
-const RUN_LAYER_IDS = ["cells", "impact", "s2_post", "s2_pre", "sar_change", "buildings", "roads", "bridges-pt", "settlements", "settlements-lbl", "path"];
+const RUN_LAYER_IDS = ["cells", "cells-hit", "impact", "s2_post", "s2_pre", "sar_change", "buildings", "roads", "bridges-pt", "settlements", "settlements-lbl", "path"];
 
 function clearRunLayers() {
   for (const id of RUN_LAYER_IDS) if (map.getLayer(id)) map.removeLayer(id);
@@ -213,6 +213,7 @@ function drawCells(res) {
     geometry: { type: "Polygon", coordinates: [c.ring] } })) };
   if (map.getSource("cells")) { map.getSource("cells").setData(fc); return; }
   map.addSource("cells", { type: "geojson", data: fc });
+  map.addLayer({ id: "cells-hit", type: "fill", source: "cells", paint: { "fill-color": "#fff", "fill-opacity": 0.01 } });
   map.addLayer({ id: "cells", type: "line", source: "cells", paint: { "line-width": 2,
     "line-color": ["match", ["get", "verdict"], "confirmed", "#0ca30c", "needs_review", "#fab219", "likely_false_alarm", "#d03b3b",
                    "reviewed_keep", "#3987e5", "reviewed_remove", "#8f8e86", "#fff"] } });
@@ -229,7 +230,8 @@ async function loadInspection(id) {
   const running = r?.job?.state === "running";
   $("#inspectState").textContent = running ? `${r.job.pct}% · ${r.job.step}` : res ? `planner: ${res.planner} · ${res.inspected_utc}` : "not inspected yet";
   if (running) setTimeout(() => state.runId === id && loadInspection(id), 2000);
-  if (!res || running) { if (!res) { $("#inspectTiles").innerHTML = ""; $("#cellList").innerHTML = ""; $("#publishGate").innerHTML = ""; drawCells(null); } return; }
+  if (!res || running) { if (!res) { state.inspection = null; $("#inspectTiles").innerHTML = ""; $("#cellList").innerHTML = ""; $("#publishGate").innerHTML = ""; drawCells(null); } return; }
+  state.inspection = res;
   const s = res.summary;
   $("#inspectTiles").innerHTML = [["", s.confirmed, `cells confirmed (${s.confirmed_ha} ha)`], ["warn", s.pending_review, "cells waiting for you"],
     ["", res.later_looks, "later images fetched"], ["crit", s.removed_by_analyst, "removed by analyst"]]
@@ -257,15 +259,49 @@ async function loadInspection(id) {
   }).join("");
   $("#cellList").querySelectorAll("li").forEach((li) => {
     li.querySelector(".head").onclick = () => map.flyTo({ center: [+li.dataset.lon, +li.dataset.lat], zoom: 14.5 });
-    li.querySelectorAll("img").forEach((im) => im.onclick = () => window.open(im.src));
-    li.querySelectorAll(".acts button").forEach((b) => b.onclick = async () => {
-      await fetch(`/api/runs/${id}/inspection/${li.dataset.id}`, { method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ decision: b.dataset.d }) });
-      loadInspection(id);
-    });
+    const c = res.cells.find((x) => x.id === li.dataset.id);
+    li.querySelectorAll("img").forEach((im) => im.onclick = () => openCell(id, c));
+    li.querySelectorAll(".acts button").forEach((b) => b.onclick = () => decideCell(id, li.dataset.id, b.dataset.d));
   });
   drawCells(res);
 }
+function cellCard(id, c, big) {
+  const [cls, label] = VERDICT[c.verdict];
+  const rv = c.review ? `<p class="why">Analyst: <b>${c.review.decision}</b>${c.review.note ? " · " + c.review.note : ""}</p>` : "";
+  const acts = c.verdict !== "confirmed" && !c.review
+    ? `<div class="acts"><button class="keep" data-d="keep" data-id="${c.id}">Keep: real damage</button><button class="remove" data-d="remove" data-id="${c.id}">Remove: not flood</button></div>` : "";
+  return `<h3>${c.impact_ha} ha · ${c.buildings_hit} buildings · ${c.road_segments_cut} road segments cut <span class="pill ${cls}">${label}</span></h3>
+    <p class="why">${c.reason}</p>
+    <img src="/runs/${id}/${c.chip}" alt="before, after and colour change">
+    ${c.chip_later ? `<p class="why">The same cell weeks later:</p><img src="/runs/${id}/${c.chip_later}" alt="the same cell weeks later">` : ""}
+    ${big ? `<div class="trace">${traceText(c)}</div>` : ""}${rv}${acts}`;
+}
+function openCell(id, c) {
+  $("#lbBody").innerHTML = cellCard(id, c, true);
+  $("#lightbox").hidden = false;
+  $("#lbBody").querySelectorAll(".acts button").forEach((b) => b.onclick = () => decideCell(id, b.dataset.id, b.dataset.d));
+}
+async function decideCell(id, cell, d) {
+  await fetch(`/api/runs/${id}/inspection/${cell}`, { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ decision: d }) });
+  $("#lightbox").hidden = true;
+  await loadInspection(id);
+  const next = state.inspection?.cells.find((c) => c.verdict !== "confirmed" && !c.review);
+  if (next) { map.flyTo({ center: [next.lon, next.lat], zoom: 14.5 }); openCell(id, next); }   // straight to the next one
+}
+$("#lbClose").onclick = () => { $("#lightbox").hidden = true; };
+$("#lightbox").onclick = (e) => { if (e.target.id === "lightbox") $("#lightbox").hidden = true; };
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#lightbox").hidden = true; });
+map.on("click", "cells-hit", (e) => {
+  if (state.drawing || state.tracing || !state.inspection) return;
+  const c = state.inspection.cells.find((x) => x.id === e.features[0].properties.id);
+  if (!c) return;
+  const [cls, label] = VERDICT[c.verdict];
+  new maplibregl.Popup({ maxWidth: "360px" }).setLngLat(e.lngLat).setHTML(
+    `<b>${c.impact_ha} ha · ${label}</b>${c.review ? " · analyst: " + c.review.decision : ""}<br>${c.reason}
+     <img src="/runs/${state.runId}/${c.chip}" alt="chip"><a href="#" data-open="${c.id}">Open large</a>`).addTo(map);
+  setTimeout(() => document.querySelector(`[data-open="${c.id}"]`)?.addEventListener("click", (ev) => { ev.preventDefault(); openCell(state.runId, c); }), 0);
+});
 $("#inspectBtn").onclick = async () => {
   if (!state.runId) return;
   await fetch(`/api/runs/${state.runId}/inspect`, { method: "POST" });
