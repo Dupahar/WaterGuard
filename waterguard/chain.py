@@ -173,7 +173,14 @@ class Ledger:
         rc = self._send(self.registry.functions.publish(
             b32(p["key"]), b32(p["report_root"]), b32(p["claims_root"]), p["bbox_e5"], ev,
             bytes.fromhex(p["code_version"][:40].ljust(40, "0")), uri))
-        return self._record(run_id, p, "published", rc)
+        a = self._record(run_id, p, "published", rc)
+        ins = inspector.load(run_id)
+        if not ok and ins:   # say so wherever the anchor is shown
+            a["unreviewed_cells"] = ins["summary"]["pending_review"]
+            p = ledger.load(run_id)
+            p["anchors"] = [x if x["tx"] != a["tx"] else a for x in p["anchors"]]
+            (ledger.RUNS_DIR / run_id / "proof.json").write_text(json.dumps(p, indent=1, ensure_ascii=False), encoding="utf-8")
+        return a
 
     def rerun(self, run_id: str) -> dict:
         """Re-derive a report from nothing but its on-chain record (area + event time) and open data."""

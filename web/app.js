@@ -158,7 +158,8 @@ map.on("click", "settlements", (e) => {
   new maplibregl.Popup().setLngLat(e.lngLat).setHTML(
     `<b>${p.name || "Unnamed cluster"}</b><br>${p.buildings} buildings · est. ${p.people_est} people<br>
      Road: <b>${p.vehicle_status}</b>${p.vehicle_lost ? " (lost: " + p.vehicle_lost + ")" : ""}<br>
-     Road km to health facility: ${p.vehicle_health_km_before ?? "–"} → ${p.vehicle_health_km_after ?? "no route"}`).addTo(map);
+     ${p.vehicle_health_km_before == null ? "No road to a mapped health facility in this area, even before the flood"
+       : `Road km to health facility: ${p.vehicle_health_km_before} → ${p.vehicle_health_km_after ?? "no route now"}`}`).addTo(map);
 });
 
 // ---------------------------------------------------------------- results panel
@@ -319,12 +320,13 @@ async function loadProof(id) {
   if (!p || p.detail) { $("#proofInfo").innerHTML = "<p>No proof for this run.</p>"; return; }
   state.proof = p;
   const c = p.chain, pub = p.anchors.find((a) => a.kind === "published");
+  const unrev = pub?.unreviewed_cells ? ` · <b>published with ${pub.unreviewed_cells} inspected cells not yet reviewed by an analyst</b>` : "";
   const ledgerLine = !c ? "No public ledger configured on this server."
     : !c.published ? `Not anchored yet on ${c.network}.`
     : `${c.final ? "✓ <b>Final</b>" : c.disputed ? "⚠ <b>Disputed</b>" : "… <b>Anchored, awaiting confirmation</b>"} on ${c.network} ·
        ${c.confirmations}/${c.quorum} independent confirmations` +
       (pub?.tx_url ? ` · <a href="${pub.tx_url}" target="_blank">transaction</a>` : "") +
-      (c.registry_url ? ` · <a href="${c.registry_url}" target="_blank">registry</a>` : "");
+      (c.registry_url ? ` · <a href="${c.registry_url}" target="_blank">registry</a>` : "") + unrev;
   $("#proofInfo").innerHTML = `<p><b>Report root</b> <code>${short(p.report_root)}</code> · ${p.files.length} files</p>
     <p><b>Claims root</b> <code>${short(p.claims_root)}</code> · ${p.settlements.length} settlements</p>
     <p><b>Code</b> <code>${p.code_version.slice(0, 12)}</code></p><p>${ledgerLine}</p>`;
