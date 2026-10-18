@@ -7,3 +7,4 @@ __pycache__/
 .pytest_cache/
 video/node_modules/
 video/out/
+video/public/audio/product_mix.wav
