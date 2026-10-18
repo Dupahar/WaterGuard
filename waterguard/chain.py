@@ -280,7 +280,7 @@ def _summary(run_id):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("cmd", choices=["compile", "wallet", "deploy", "publish", "confirm", "status", "add-verifier",
-                                    "open-fund", "claim"])
+                                    "open-fund", "claim", "resolve"])
     ap.add_argument("args", nargs="*")
     ap.add_argument("--quorum", type=int, default=2)
     ap.add_argument("--window", type=int, default=3600)

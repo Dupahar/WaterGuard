@@ -86,13 +86,21 @@ def file_leaf(name: str, data: bytes) -> bytes:
     return sha(sha(sha(name.encode()) + sha(data)))
 
 
+# modules whose code decides the numbers in a report; a change to anything else (dashboard, ledger,
+# docs) must not change a report's identity
+ANALYSIS_CODE = ["waterguard/pipeline.py", "waterguard/detect.py", "waterguard/sar.py", "waterguard/optical.py",
+                 "waterguard/terrain.py", "waterguard/access.py", "waterguard/damage.py", "waterguard/osm.py",
+                 "waterguard/grid.py", "waterguard/readers.py", "waterguard/config.py", "waterguard/providers"]
+
+
 def code_version() -> str:
+    """The commit that last changed the analysis code (WATERGUARD_VERSION overrides, e.g. in a container)."""
     v = os.getenv("WATERGUARD_VERSION")
     if v:
         return v
     try:
-        return subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, text=True,
-                              timeout=5).stdout.strip() or "0" * 40
+        return subprocess.run(["git", "log", "-1", "--format=%H", "--", *ANALYSIS_CODE], cwd=ROOT, capture_output=True,
+                              text=True, timeout=5).stdout.strip() or "0" * 40
     except Exception:
         return "0" * 40
 
