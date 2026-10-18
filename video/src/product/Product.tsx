@@ -251,7 +251,7 @@ const Walk: React.FC<{t: number; p: PData}> = ({t, p}) => {
 		{t: at(3, 'Pick') - 0.1, p: [1200, 300]},
 		{t: at(3, 'place') + 0.1, p: boxCenter(B('a_empty', 'preset')), click: true},
 		{t: at(3, 'map') - 0.05, p: boxCenter(B('a_preset', 'run')), click: true},
-		{t: at(3, 'radar'), p: [1300, 260]},
+		{t: at(3, 'radar'), p: [640, 520]},
 		{t: at(4, 'before') - 0.05, p: boxCenter(B('b_before', 'before_btn')), click: true},
 		{t: at(4, 'after') - 0.05, p: boxCenter(B('b_after', 'after_btn')), click: true},
 		{t: at(4, 'settlement'), p: boxCenter(B('b_popup', 'dot')), click: true},
