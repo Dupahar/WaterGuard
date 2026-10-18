@@ -155,6 +155,8 @@ area + date
 | `waterguard/flowpath.py` | Flood path from any upstream point |
 | `waterguard/copilot.py` | Copilot, tools, number verifier, LLM backends |
 | `waterguard/sitrep.py` | One-page report (EN/NE), offline copilot |
+| `waterguard/vision.py` | OpenCV 5 cell inspection: co-registration, colour/structure/texture change, chips |
+| `waterguard/inspector.py` | Inspector agent (perceive → decide → act), review queue, analyst veto |
 | `waterguard/ledger.py` | Report and settlement-claims Merkle trees, proofs |
 | `waterguard/chain.py`, `contracts/` | Public-ledger anchoring, independent confirmation, relief payouts |
 | `waterguard/validate.py` | EMSR927 comparison and false-alarm tests (the only code that reads EMS data) |
@@ -168,6 +170,39 @@ Ask it *"Which villages are cut off?"*, *"What about Syabru Bensi?"* or *"कु
 - 🔢 **Every number gets fact-checked.** Each number in a draft (ASCII or Devanagari digits) must appear in a tool result from that conversation. If one doesn't, the model gets one retry with the offenders listed. Still wrong? Those numbers become `[unverified]` and the UI shows a warning. Every answer ends with "✓ N numbers checked".
 - 🗺️ **It drives the map.** Answers fly to the named place, mark bridges and draw flood paths.
 - 📄 **The one-page report is template-based**, so its numbers are exactly the pipeline's.
+
+## 🔎 An inspector agent that looks twice
+
+A per-pixel map is only a first draft. Before a report goes out, an **inspector agent** looks again at every part of it that matters, most exposed first, the way an analyst would, and decides what to do next (`waterguard/inspector.py`, `waterguard/vision.py`).
+
+```
+for each 600 m cell of the impact map (ranked by buildings hit, roads cut, people nearby):
+  perceive  OpenCV 5 on the cell vs nearby unflagged valley ground:
+            ECC sub-pixel co-registration · CIELAB colour change · SSIM structure · Laplacian texture ·
+            NDVI loss · radar |z| · Canny edge-artefact check · contour shape  -> 4 evidence lines
+  decide    all 4 agree                          -> confirm
+            3 agree, or clouds hid it            -> look later
+            weaker                               -> ask a human
+  act       look later: download a fresh cloud-free Sentinel-2 composite of just this cell from weeks
+            later and measure again (debris and scour persist; wet soil, turbid water, green-up fade)
+            -> confirm if the colour change persists · flag if the ground reverted · otherwise ask a human
+```
+
+- 🧑‍⚖️ **Humans stay in charge.** The agent never removes anything. Each cell it can't confirm goes to a review queue with an annotated before / after / colour-change chip and the full perceive → decide → act trace. **Keep** or **Remove** is the analyst's call; removals re-run the pipeline with those cells vetoed, and damage, access and the report follow. A report is anchored on the public ledger only once the queue is empty (or the anchor says how many cells were unreviewed).
+- 🤖 **Rule or model planner.** By default a fixed rule set decides. With `--planner llm` a language model (Amazon Bedrock or any OpenAI-compatible endpoint) picks the next action from the same measurements, under the same guard rails: it cannot confirm without enough agreeing evidence, and it cannot remove anything.
+- 📏 **Scored against EMS, held out.** Rules were set on AOI01 + AOI02 and the Tadi Khola control; AOI03 + AOI05 are held out (`python -m waterguard.validate --inspection`):
+
+| | Cells | Confirmed by the agent | of which EMS-confirmed damage | Real damage area confirmed with no human | Not-in-EMS area sent to a human | Later looks |
+|---|---|---|---|---|---|---|
+| Tuning (AOI01, AOI02, Tadi Khola) | 30 | 13 | **100 %** | 52 % | **100 %** (all 8 Tadi Khola cells) | 16 |
+| **Held-out (AOI03, AOI05)** | 113 | 64 | **98.4 %** | **64 %** | 40 % (1 of 2 cells) | 34 |
+
+  The honest finding behind the design: the Tadi Khola "false alarms" are real monsoon change in a tributary the outburst flood never reached, and no pixel threshold separates them from flood damage without also dropping real damage. So the agent doesn't try to. It confirms only multi-sensor agreement and hands the rest to a person.
+
+```bash
+python -m waterguard.inspector <run_id> [--planner rules|llm]     # or the dashboard's Inspect tab
+python -m pytest tests/test_vision.py -q                          # co-registration, measurements, guard rails
+```
 
 ## 🔐 Reports anyone can check, relief that moves on evidence
 
