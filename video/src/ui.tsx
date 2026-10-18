@@ -34,7 +34,8 @@ export const Rise: React.FC<{
 						<span
 							style={{
 								display: 'inline-block',
-								transform: `translateY(${(1 - k) * 105 - o * 105}%)`,
+								transform: `translateY(${(1 - k) * 105 - o * 115}%)`,
+								opacity: 1 - o,
 								color: accent[w] ?? color,
 								fontWeight: it ? 400 : weight,
 								fontFamily: it ? F.serif : font,

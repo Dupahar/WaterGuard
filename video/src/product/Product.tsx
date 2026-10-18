@@ -131,45 +131,82 @@ const Flood: React.FC<{t: number}> = ({t}) => {
 };
 
 // ---------------- 02 the problem -> WaterGuard ----------------
+// three footprints of "the same" flood (same path structure, so they can morph into one)
+const FOOT: number[][] = [
+	[40, 120, 90, 30, 220, 40, 260, 110, 300, 190, 180, 260, 110, 230, 50, 205, 10, 170, 40, 120],
+	[60, 90, 130, 20, 250, 80, 270, 150, 290, 230, 150, 250, 90, 210, 30, 170, 20, 130, 60, 90],
+	[30, 150, 60, 60, 180, 20, 250, 80, 320, 140, 240, 240, 150, 240, 70, 240, 10, 220, 30, 150],
+];
+const footD = (n: number[]) => `M${n[0]} ${n[1]} C${n[2]} ${n[3]} ${n[4]} ${n[5]} ${n[6]} ${n[7]} C${n[8]} ${n[9]} ${n[10]} ${n[11]} ${n[12]} ${n[13]} C${n[14]} ${n[15]} ${n[16]} ${n[17]} ${n[18]} ${n[19]}Z`;
+const MEAN = FOOT[0].map((_, i) => (FOOT[0][i] + FOOT[1][i] + FOOT[2][i]) / 3);
+
 const Problem: React.FC<{t: number}> = ({t}) => {
 	const a = sStart(2) - 0.6, b = sEnd(2) + 1.0;
 	const k = vis(t, a, b, 0.8, 0.8);
 	if (k <= 0) return null;
-	const who = [['Government', at(2, 'governments')], ['Aid groups', at(2, 'aid')], ['Insurers', at(2, 'insurers')]] as [string, number][];
-	// three footprints of "the same" flood that do not agree
-	const shapes = ['M40 120 C 90 30 220 40 260 110 C 300 190 180 260 110 230 C 50 205 10 170 40 120Z', 'M60 90 C 130 20 250 80 270 150 C 290 230 150 250 90 210 C 30 170 20 130 60 90Z', 'M30 150 C 60 60 180 20 250 80 C 320 140 240 240 150 240 C 70 240 10 220 30 150Z'];
-	const cols = [C.waterSoft, C.amber, C.green];
-	const late = easeOut(clamp((t - at(2, 'weeks')) / 0.8));
-	const logo = easeOut(clamp((t - at(2, 'Water')) / 0.9));
-	const away = ease(clamp((t - (at(2, 'Water') - 0.2)) / 0.8));
+	const who: [string, number, string][] = [
+		['Government survey', at(2, 'governments'), C.waterSoft], ['Aid-group assessment', at(2, 'aid'), C.amber], ["Insurer's loss adjuster", at(2, 'insurers'), C.green]];
+	const argue = clamp((t - at(2, 'argue')) / 0.3) * (1 - clamp((t - at(2, 'relief')) / 0.6));
+	const tw = at(2, 'Water');
+	const merge = ease(clamp((t - (tw - 0.9)) / 0.9));
+	const away = ease(clamp((t - (tw + 0.1)) / 0.7));
+	const logo = easeOut(clamp((t - tw) / 0.9));
+	const days = Math.floor(lerp(0, 23, easeOut(clamp((t - at(2, 'relief')) / 1.8))));
+	const late = easeOut(clamp((t - at(2, 'relief') + 0.2) / 0.5)) * (1 - merge);
+	// the panel uses the same grid as the product window
+	const X = 560, Y = FRAME.y, PW = 1280, PH = FRAME.bar + FH;
+	const drift = clamp((t - a) / (tw - a));
 	return (
 		<AbsoluteFill style={{opacity: k}}>
-			<div style={{position: 'absolute', left: COL.x, top: FRAME.y + 6, width: 820, opacity: 1 - away}}>
-				<Mono color={C.orange}>02 · The problem</Mono>
-				<div style={{height: 26}} />
-				<Rise t={t} at={at(2, 'count') - 0.2} text="Everyone counts the damage their own way." size={64} weight={800} style={{width: 760}} />
-			</div>
-			<div style={{position: 'absolute', left: 960, top: 230, width: 820, height: 560, opacity: 1 - away}}>
-				<svg viewBox="0 0 320 280" style={{position: 'absolute', left: 60, top: 0, width: 520, height: 455, overflow: 'visible'}}>
-					{who.map(([w, tt], i) => {
-						const q = easeOut(clamp((t - tt) / 0.7));
-						return <path key={w} d={shapes[i]} fill={cols[i] + '22'} stroke={cols[i]} strokeWidth={2.5} opacity={q} transform={`translate(${(1 - q) * 30 * (i - 1)} ${(1 - q) * 20})`} />;
+			<Side t={t} n={2} from={a} to={tw - 0.2} title="Everyone counts the damage their own way" sub="Three assessments of the same valley. None of them agree." />
+			<div style={{position: 'absolute', left: X, top: Y, width: PW, height: PH, borderRadius: 18, overflow: 'hidden', opacity: 1 - away,
+				transform: `scale(${1 - 0.06 * away})`, boxShadow: '0 30px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.08)'}}>
+				<Img src={staticFile('data/sya_s2_post.png')} style={{position: 'absolute', left: '50%', top: '50%', width: PW * 1.25, transform: `translate(-50%, -50%) scale(${1 + 0.1 * drift}) translate(${-30 * drift}px, ${-20 * drift}px)`,
+					filter: 'brightness(.5) saturate(.7)'}} />
+				<div style={{position: 'absolute', inset: 0, background: 'radial-gradient(ellipse at 50% 50%, rgba(11,13,17,0) 30%, rgba(11,13,17,.75) 100%)'}} />
+				<svg viewBox="-40 -40 400 360" style={{position: 'absolute', left: 260, top: 60, width: 760, height: 684, overflow: 'visible'}}>
+					{who.map(([w, tt, col], i) => {
+						const q = clamp((t - tt) / 0.9);
+						if (q <= 0) return null;
+						const wob = Math.sin(t * 0.9 + i * 2.1) * 4 + argue * Math.sin(t * 16 + i * 3) * 3;
+						// each assessor draws it somewhere else, at another size; they converge on one footprint
+						const [ox, oy, sc] = [[-95, -55, 0.78], [85, 35, 1.12], [-35, 95, 0.62]][i];
+						const u = 1 - merge;
+						const pts = FOOT[i].map((v, j) => {
+							const m = lerp(v, MEAN[j], merge);
+							const c0 = j % 2 ? 140 : 160;
+							return c0 + (m - c0) * lerp(1, sc, u) + (j % 2 ? oy : ox) * u + (j % 2 ? wob : -wob) * u;
+						});
+						const colr = merge > 0.5 ? C.orange : col;
+						return (
+							<g key={w} opacity={merge > 0 && i > 0 ? 1 - merge : 1}>
+								<path d={footD(pts)} fill={colr} fillOpacity={0.12 + 0.12 * merge} stroke={colr} strokeWidth={2.4 + 1.6 * merge}
+									pathLength={1} strokeDasharray="1 1" strokeDashoffset={1 - easeOut(q)} />
+							</g>
+						);
 					})}
-					<text x={160} y={150} textAnchor="middle" fontFamily={F.sans} fontWeight={800} fontSize={44} fill="#fff" opacity={easeOut(clamp((t - at(2, 'argue')) / 0.5))}>≠</text>
-				</svg>
-				<div style={{position: 'absolute', left: 600, top: 40}}>
-					{who.map(([w, tt], i) => (
-						<div key={w} style={{display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18, opacity: easeOut(clamp((t - tt) / 0.5)), fontFamily: F.sans, fontSize: 24, color: '#fff'}}>
-							<div style={{width: 14, height: 14, borderRadius: 4, border: `2px solid ${cols[i]}`, background: cols[i] + '33'}} />{w}
-						</div>
+					{argue > 0 && [[150, 60], [230, 200], [70, 210]].map(([x, y], i) => (
+						<text key={i} x={x} y={y} textAnchor="middle" fontFamily={F.sans} fontWeight={800} fontSize={38 + 6 * Math.sin(t * 8 + i)} fill="#fff" opacity={argue * (0.6 + 0.4 * Math.sin(t * 6 + i))}>≠</text>
 					))}
-				</div>
-				<div style={{position: 'absolute', left: 60, top: 480, width: 700, opacity: late}}>
-					<div style={{height: 6, borderRadius: 3, background: 'rgba(255,255,255,.12)', overflow: 'hidden'}}>
-						<div style={{width: `${late * 100}%`, height: '100%', background: C.red}} />
+				</svg>
+				{who.map(([w, tt, col], i) => {
+					const q = easeOut(clamp((t - tt) / 0.6)) * (1 - merge);
+					const pos = [[330, 118], [960, 520], [180, 560]][i];
+					return (
+						<div key={w} style={{position: 'absolute', left: pos[0], top: pos[1] + Math.sin(t * 1.2 + i) * 6, opacity: q, transform: `translateY(${(1 - q) * 14}px)`,
+							display: 'flex', alignItems: 'center', gap: 10, padding: '10px 16px', borderRadius: 12, background: 'rgba(11,13,17,.82)', border: `1px solid ${col}66`,
+							fontFamily: F.sans, fontSize: 22, fontWeight: 600, color: '#fff', whiteSpace: 'nowrap'}}>
+							<div style={{width: 12, height: 12, borderRadius: 3, background: col}} />{w}
+						</div>
+					);
+				})}
+				<div style={{position: 'absolute', left: 40, right: 40, bottom: 34, opacity: late}}>
+					<div style={{display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 10}}>
+						<Mono color="#fff">Relief still waiting</Mono>
+						<div style={{fontFamily: F.sans, fontWeight: 800, fontSize: 44, color: C.red, letterSpacing: '-0.03em'}}>Day {days}</div>
 					</div>
-					<div style={{display: 'flex', justifyContent: 'space-between', marginTop: 12}}>
-						<Mono>Flood</Mono><Mono color={C.red}>Relief arrives · weeks later</Mono>
+					<div style={{height: 6, borderRadius: 3, background: 'rgba(255,255,255,.14)', overflow: 'hidden'}}>
+						<div style={{width: `${(days / 23) * 100}%`, height: '100%', background: C.red}} />
 					</div>
 				</div>
 			</div>
@@ -181,8 +218,8 @@ const Problem: React.FC<{t: number}> = ({t}) => {
 					<div style={{fontFamily: F.sans, fontWeight: 800, fontSize: 120, letterSpacing: '-0.05em', color: '#fff'}}>WaterGuard</div>
 				</div>
 				<div style={{marginTop: 26, display: 'flex', gap: 18, fontFamily: F.sans, fontSize: 34, color: 'rgba(255,255,255,.75)'}}>
-					<span style={{opacity: easeOut(clamp((t - at(2, 'answers')) / 0.5))}}>Answers the question.</span>
-					<span style={{opacity: easeOut(clamp((t - at(2, 'anyone')) / 0.5)), color: C.orange, fontFamily: F.serif, fontStyle: 'italic', fontSize: 40}}>Anyone can check.</span>
+					<span style={{opacity: easeOut(clamp((t - at(2, 'answers')) / 0.5))}}>One answer.</span>
+					<span style={{opacity: easeOut(clamp((t - at(2, 'anyone')) / 0.5)), color: C.orange, fontFamily: F.serif, fontStyle: 'italic', fontSize: 40}}>Anyone can check it.</span>
 				</div>
 			</AbsoluteFill>
 		</AbsoluteFill>
