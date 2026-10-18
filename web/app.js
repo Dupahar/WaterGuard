@@ -212,12 +212,18 @@ function drawCells(res) {
   const fc = { type: "FeatureCollection", features: (res?.cells || []).map((c) => ({ type: "Feature",
     properties: { id: c.id, verdict: c.review ? "reviewed_" + c.review.decision : c.verdict },
     geometry: { type: "Polygon", coordinates: [c.ring] } })) };
-  if (map.getSource("cells")) { map.getSource("cells").setData(fc); return; }
+  if (map.getSource("cells")) { map.getSource("cells").setData(fc); showCells(); return; }
   map.addSource("cells", { type: "geojson", data: fc });
   map.addLayer({ id: "cells-hit", type: "fill", source: "cells", paint: { "fill-color": "#fff", "fill-opacity": 0.01 } });
   map.addLayer({ id: "cells", type: "line", source: "cells", paint: { "line-width": 2,
     "line-color": ["match", ["get", "verdict"], "confirmed", "#0ca30c", "needs_review", "#fab219", "likely_false_alarm", "#d03b3b",
                    "reviewed_keep", "#3987e5", "reviewed_remove", "#8f8e86", "#fff"] } });
+  showCells();
+}
+// inspection cells belong to the Inspect tab only
+function showCells() {
+  const on = document.querySelector('.tabs button[data-tab="inspect"]')?.getAttribute("aria-selected") === "true";
+  for (const id of ["cells", "cells-hit"]) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
 }
 function traceText(c) {
   return c.trace.map((t) => t.step === "perceive"
@@ -302,6 +308,7 @@ $("#lightbox").onclick = (e) => { if (e.target.id === "lightbox") $("#lightbox")
 document.addEventListener("keydown", (e) => { if (e.key === "Escape") $("#lightbox").hidden = true; });
 map.on("click", "cells-hit", (e) => {
   if (state.drawing || state.tracing || !state.inspection) return;
+  if (map.queryRenderedFeatures(e.point, { layers: ["settlements", "bridges-pt"] }).length) return;   // the dot wins
   const c = state.inspection.cells.find((x) => x.id === e.features[0].properties.id);
   if (!c) return;
   const [cls, label] = VERDICT[c.verdict];
@@ -331,7 +338,7 @@ async function loadProof(id) {
   const ledgerLine = !c ? "No public ledger configured on this server."
     : !c.published ? `Not anchored yet on ${c.network}.`
     : `${c.final ? "✓ <b>Final</b>" : c.disputed ? "⚠ <b>Disputed</b>" : "… <b>Anchored, awaiting confirmation</b>"} on ${c.network} ·
-       ${c.confirmations}/${c.quorum} independent confirmations` +
+       ${c.confirmations} independent confirmations (${c.quorum} needed)` +
       (pub?.tx_url ? ` · <a href="${pub.tx_url}" target="_blank">transaction</a>` : "") +
       (c.registry_url ? ` · <a href="${c.registry_url}" target="_blank">registry</a>` : "") + unrev;
   $("#proofInfo").innerHTML = `<p><b>Report root</b> <code>${short(p.report_root)}</code> · ${p.files.length} files</p>
@@ -356,6 +363,7 @@ $("#verifyBtn").onclick = async () => {
 document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
   document.querySelectorAll(".tabs button").forEach((x) => x.setAttribute("aria-selected", x === b));
   document.querySelectorAll(".tab").forEach((t) => t.hidden = t.id !== "tab-" + b.dataset.tab);
+  showCells();
 });
 
 // ---------------------------------------------------------------- copilot

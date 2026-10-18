@@ -72,7 +72,7 @@ async function verifyInBrowser(runId, proof, chain, log) {
     if (!L.published_at) { log("✗ This report has not been anchored yet."); return; }
     const same = L.report_root === reportRoot && L.claims_root === claimsRoot;
     log(`${ok(same)} roots ${same ? "match" : "DO NOT match"} the ledger (anchored ${new Date(L.published_at * 1000).toISOString().slice(0, 16).replace("T", " ")} UTC)`);
-    log(`${L.disputed ? "⚠ disputed by a verifier" : L.final ? "✓ final" : "… awaiting independent confirmation"} · ${L.confirmations} of ${chain.quorum} confirmations`);
+    log(`${L.disputed ? "⚠ disputed by a verifier" : L.final ? "✓ final" : "… awaiting independent confirmation"} · ${L.confirmations} independent confirmation${L.confirmations === 1 ? "" : "s"} (${chain.quorum} needed)`);
     return same;
   } catch (e) { log("Could not reach the public RPC: " + e.message); }
 }

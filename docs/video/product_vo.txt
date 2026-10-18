@@ -1,0 +1,38 @@
+WaterGuard product film: narration (12 blocks). Guide read: Amazon Polly neural (scripts/product_vo.py).
+Replace video/public/audio/vo_product/k1..k12.mp3 with your own reads and re-run scripts/product_timeline.py.
+
+BLOCK 1 (hook)
+The twenty-sixth of August. A glacier lake bursts above the Trishuli valley in Nepal. By morning, one question matters more than any other. Which villages can we still reach?
+
+BLOCK 2 (problem)
+After every flood, governments, aid groups and insurers each count the damage their own way. They argue over whose numbers are right, and relief arrives weeks late. WaterGuard answers the question, and makes the answer something anyone can check.
+
+BLOCK 3 (map the flood)
+Pick a place and a date, then press Map the flood. WaterGuard pulls free Sentinel-1 radar, which sees through monsoon cloud, Sentinel-2 imagery, the Copernicus elevation model, and OpenStreetMap from the day before the flood. A few minutes later, the debris path is on the map.
+
+BLOCK 4 (explore)
+Flip between before and after. Click a settlement. Syabru Bensi still has a road, but most of its houses do not. Two hamlets upstream have lost every road link. Damaged bridges, buildings and health posts are flagged the same way.
+
+BLOCK 5 (copilot)
+Ask in English or Nepali. The copilot can only quote numbers the maps back up, and every answer shows how many it checked.
+
+BLOCK 6 (report)
+Need it on paper? One click prints a one-page situation report, in English or Nepali. Every number comes straight from the map, with a code to check it.
+
+BLOCK 7 (flood path)
+If a second surge comes down the valley, click any point upstream. WaterGuard traces the path down the elevation model and lists the settlements in its way.
+
+BLOCK 8 (inspector)
+Before anything goes out, an inspector agent looks again at every cell that matters. It measures colour, structure, vegetation and radar change against untouched ground nearby. When clouds leave doubt, it fetches a fresh image weeks later, and confirms only what the evidence agrees on. Everything else waits for a human.
+
+BLOCK 9 (proof)
+Every report gets two fingerprints. One covers every file, the other covers every village. Both are anchored on Ethereum. Press verify, and your own browser re-hashes the files and asks the blockchain directly.
+
+BLOCK 10 (verifier)
+Because the data and the code are open, anyone can re-run the analysis. Our first report was disputed. An independent verifier counted one village differently, and every payout froze. It was a real bug in our code. We fixed it and published again, and a laptop and an AWS server both reproduced the result, exactly.
+
+BLOCK 11 (relief)
+A relief fund was set up in advance, a fixed amount per stranded person, capped for each village. Once the report was final, the contract paid the relief partner directly, village by village, straight from the proofs.
+
+BLOCK 12 (close)
+On areas it never saw, it matches the official European damage maps with F1 scores of zero point nine two and zero point eight eight. Floods from space. Answers anyone can verify. This is WaterGuard.

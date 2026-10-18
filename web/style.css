@@ -62,7 +62,7 @@ select { flex: 1; min-width: 0; }
 .list li { padding: 6px 4px; border-bottom: 1px solid var(--line); cursor: pointer; display: flex; justify-content: space-between; gap: 8px; }
 .list li:hover { background: var(--surface-1); }
 .list small { color: var(--text-muted); }
-.pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--critical); color: #fff; white-space: nowrap; }
+.pill { font-size: 11px; padding: 1px 7px; border-radius: 999px; background: var(--critical); color: #fff; white-space: nowrap; flex: none; align-self: center; }
 .pill.warn { background: var(--warning); color: #111; }
 
 .chat { max-height: 340px; overflow-y: auto; display: flex; flex-direction: column; gap: 8px; font-size: 13px; }
