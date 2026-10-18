@@ -110,7 +110,7 @@ Everything lands in `data/runs/<run_id>/`: `facts.json` (every number, with wher
 ```bash
 python scripts/fetch_emsr927.py         # downloads the EMS reference vectors to data/validation/
 python -m waterguard.validate           # scores AOI01, 02, 03, 05 + the false-alarm tests
-python -m pytest tests/test_core.py -q  # offline unit tests
+python -m pytest tests -q              # offline unit tests + ledger flow on an in-memory EVM
 ```
 
 ## ☁️ Deploy on AWS
@@ -155,17 +155,50 @@ area + date
 | `waterguard/flowpath.py` | Flood path from any upstream point |
 | `waterguard/copilot.py` | Copilot, tools, number verifier, LLM backends |
 | `waterguard/sitrep.py` | One-page report (EN/NE), offline copilot |
+| `waterguard/ledger.py` | Report and settlement-claims Merkle trees, proofs |
+| `waterguard/chain.py`, `contracts/` | Public-ledger anchoring, independent confirmation, relief payouts |
 | `waterguard/validate.py` | EMSR927 comparison and false-alarm tests (the only code that reads EMS data) |
-| `waterguard/server.py`, `web/` | Dashboard (FastAPI + MapLibre) |
+| `waterguard/server.py`, `web/` | Dashboard (FastAPI + MapLibre), in-browser proof check (`web/proof.js`) |
 
 ## 💬 The copilot that can't make things up
 
 Ask it *"Which villages are cut off?"*, *"What about Syabru Bensi?"* or *"कुन कुन पुल भत्किए?"* and it answers, or writes a short situation report, in English or Nepali.
 
-- 🙅 **It has no data of its own.** It can only call six read-only tools over the run's results: overview, cut-off list, settlement status, damaged bridges, health facilities and the flood-path tracer.
+- 🙅 **It has no data of its own.** It can only call seven read-only tools over the run's results: overview, cut-off list, settlement status, damaged bridges, health facilities, the flood-path tracer and the report's ledger proof.
 - 🔢 **Every number gets fact-checked.** Each number in a draft (ASCII or Devanagari digits) must appear in a tool result from that conversation. If one doesn't, the model gets one retry with the offenders listed. Still wrong? Those numbers become `[unverified]` and the UI shows a warning. Every answer ends with "✓ N numbers checked".
 - 🗺️ **It drives the map.** Answers fly to the named place, mark bridges and draw flood paths.
 - 📄 **The one-page report is template-based**, so its numbers are exactly the pipeline's.
+
+## 🔐 Reports anyone can check, relief that moves on evidence
+
+A damage map is only useful if the people paying for the response believe it. After a flood, governments, NGOs and insurers each make their own assessment, argue over whose numbers are right, and the money arrives weeks later. WaterGuard makes every report **tamper-evident and independently reproducible**, and lets pre-arranged relief money pay out against it automatically.
+
+**1. Every run is fingerprinted.** `waterguard/ledger.py` builds two SHA-256 Merkle roots:
+
+| Root | Commits to | Why |
+|---|---|---|
+| **report root** | every output file, byte for byte (facts, impact raster, all layers) | any copy of a report can be checked against one 32-byte number |
+| **claims root** | one leaf per settlement: position, road status, buildings, people stranded | what relief is paid against; one village can be proven without revealing the rest |
+
+**2. Roots are anchored on a public ledger** (`contracts/WaterGuardLedger.sol`, any EVM chain). The claims come only from open satellite data and open code, so **anyone can re-run the pipeline and get the same claims root**. Independent verifiers (a university lab, a second agency) do exactly that: `confirm` if their root matches, `dispute` if it doesn't. A report is **final** only after a quorum of matching re-runs and a challenge window with no dispute.
+
+**3. Relief that moves on evidence.** A donor opens a `ReliefFund` for an area and a time window: an amount per stranded person, a cap per settlement, and the relief partner who receives it (a district office or NGO). Once a report is final, anyone can submit a settlement's Merkle proof and the money goes straight to the partner. The contract checks the proof, that the settlement is inside the fund's area, that the event falls in the window, that it is really cut off, and that it has not already been paid. Forged head counts fail the proof; a disputed report pays nothing.
+
+**4. Check it yourself, without trusting us.** The dashboard's **Proof** tab downloads every file, re-hashes it *in your browser* (WebCrypto), rebuilds both roots and reads the ledger directly from a public RPC node. The printed situation report carries both roots and a QR code that opens the same check. The copilot answers *"Can I trust this report?"* from the ledger.
+
+```bash
+python -m waterguard.ledger build <run_id>          # fingerprint a run (also done automatically after every run)
+python -m waterguard.chain compile                  # Solidity -> contracts/build/
+python -m waterguard.chain wallet                   # new key for .env (WATERGUARD_LEDGER_KEY), fund it from a testnet faucet
+python -m waterguard.chain deploy --quorum 2 --window 3600
+python -m waterguard.chain publish <run_id>
+python -m waterguard.chain confirm <run_id> --rerun --as-verifier   # second party: re-run from the on-chain record, then confirm/dispute
+python -m waterguard.chain open-fund --bbox 85.30 28.20 85.40 28.30 --from 2026-08-01 --to 2026-09-30        --per-person-wei 1000000000000 --cap-wei 1000000000000000 --partner 0x... --deposit-wei 10000000000000000
+python -m waterguard.chain claim <run_id> <fund_id>
+python -m pytest tests/test_ledger.py -q            # the whole flow on an in-memory EVM
+```
+
+What a fingerprint does **not** prove: that the satellite analysis is right. It proves the report is the one that was published, and that independent re-runs agree. Accuracy is what the held-out validation above is for.
 
 ## 🛡️ Data rules we hold ourselves to
 

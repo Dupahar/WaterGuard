@@ -97,11 +97,11 @@ const LAYERS = [
   { id: "bridges", label: "Bridges", on: true },
   { id: "settlements", label: "Settlements", on: true },
 ];
-const RUN_LAYER_IDS = ["impact", "s2_post", "s2_pre", "sar_change", "buildings", "roads", "bridges-pt", "settlements", "settlements-lbl", "path"];
+const RUN_LAYER_IDS = ["cells", "impact", "s2_post", "s2_pre", "sar_change", "buildings", "roads", "bridges-pt", "settlements", "settlements-lbl", "path"];
 
 function clearRunLayers() {
   for (const id of RUN_LAYER_IDS) if (map.getLayer(id)) map.removeLayer(id);
-  for (const id of ["impact", "s2_post", "s2_pre", "sar_change", "buildings", "roads", "bridges", "settlements", "path"])
+  for (const id of ["cells", "impact", "s2_post", "s2_pre", "sar_change", "buildings", "roads", "bridges", "settlements", "path"])
     if (map.getSource(id)) map.removeSource(id);
 }
 const STATUS_COLOR = ["match", ["get", "vehicle_status"], "cut off", "#d03b3b", "partly cut", "#fab219",
@@ -201,7 +201,113 @@ function show(id, f) {
   $("#repNe").href = `/api/runs/${id}/sitrep?lang=ne`;
   $("#chat").innerHTML = "";
   addRunLayers(id, f);
+  loadProof(id);
+  loadInspection(id);
 }
+
+// ---------------------------------------------------------------- inspector agent
+const VERDICT = { confirmed: ["ok", "confirmed"], needs_review: ["warn", "needs review"], likely_false_alarm: ["", "likely false alarm"] };
+function drawCells(res) {
+  const fc = { type: "FeatureCollection", features: (res?.cells || []).map((c) => ({ type: "Feature",
+    properties: { id: c.id, verdict: c.review ? "reviewed_" + c.review.decision : c.verdict },
+    geometry: { type: "Polygon", coordinates: [c.ring] } })) };
+  if (map.getSource("cells")) { map.getSource("cells").setData(fc); return; }
+  map.addSource("cells", { type: "geojson", data: fc });
+  map.addLayer({ id: "cells", type: "line", source: "cells", paint: { "line-width": 2,
+    "line-color": ["match", ["get", "verdict"], "confirmed", "#0ca30c", "needs_review", "#fab219", "likely_false_alarm", "#d03b3b",
+                   "reviewed_keep", "#3987e5", "reviewed_remove", "#8f8e86", "#fff"] } });
+}
+function traceText(c) {
+  return c.trace.map((t) => t.step === "perceive"
+    ? "perceive  " + Object.entries(t.lines).map(([k, v]) => (v ? "✓" : "·") + k).join(" ")
+    : t.step === "act" ? `act       ${t.tool} → ${t.scenes.length} later scenes, change ${t.persistence}`
+    : `decide    ${t.action}`).join("\n");
+}
+async function loadInspection(id) {
+  const r = await fetch(`/api/runs/${id}/inspection`).then((r) => r.ok ? r.json() : null).catch(() => null);
+  const res = r?.result;
+  const running = r?.job?.state === "running";
+  $("#inspectState").textContent = running ? `${r.job.pct}% · ${r.job.step}` : res ? `planner: ${res.planner} · ${res.inspected_utc}` : "not inspected yet";
+  if (running) setTimeout(() => state.runId === id && loadInspection(id), 2000);
+  if (!res || running) { if (!res) { $("#inspectTiles").innerHTML = ""; $("#cellList").innerHTML = ""; $("#publishGate").innerHTML = ""; drawCells(null); } return; }
+  const s = res.summary;
+  $("#inspectTiles").innerHTML = [["", s.confirmed, `cells confirmed (${s.confirmed_ha} ha)`], ["warn", s.pending_review, "cells waiting for you"],
+    ["", res.later_looks, "later images fetched"], ["crit", s.removed_by_analyst, "removed by analyst"]]
+    .map(([c, v, t]) => `<div class="tile ${c}"><b>${fmt(v)}</b><span>${t}</span></div>`).join("");
+  $("#publishGate").innerHTML = r.ready_to_publish
+    ? `<p>✓ Every cell is confirmed or reviewed. <button id="applyBtn" class="ghost">Apply review &amp; fingerprint</button></p>`
+    : `<p>⏸ ${r.publish_status}: the report is not anchored until you decide.</p>`;
+  if ($("#applyBtn")) $("#applyBtn").onclick = async () => {
+    $("#applyBtn").disabled = true; $("#applyBtn").textContent = "Re-running…";
+    const a = await fetch(`/api/runs/${id}/apply-review`, { method: "POST" }).then((r) => r.json());
+    if (a.facts) show(id, a.facts); else alert(a.detail || "failed");
+  };
+  const order = { needs_review: 0, likely_false_alarm: 0, confirmed: 1 };
+  const cells = [...res.cells].sort((a, b) => (order[a.verdict] - order[b.verdict]) || (!!a.review - !!b.review) || b.priority - a.priority);
+  $("#cellList").innerHTML = cells.map((c) => {
+    const [cls, label] = VERDICT[c.verdict];
+    const rv = c.review ? `<p class="why">Analyst: <b>${c.review.decision}</b>${c.review.note ? " · " + c.review.note : ""}</p>` : "";
+    const acts = c.verdict !== "confirmed" && !c.review
+      ? `<div class="acts"><button class="keep" data-d="keep">Keep: real damage</button><button class="remove" data-d="remove">Remove: not flood</button></div>` : "";
+    return `<li data-id="${c.id}" data-lon="${c.lon}" data-lat="${c.lat}">
+      <div class="head"><span><b>${c.impact_ha} ha</b> · ${c.buildings_hit} buildings · ${c.road_segments_cut} road segments · ~${fmt(c.people_nearby_est)} people nearby</span><span class="pill ${cls}">${label}</span></div>
+      <p class="why">${c.reason}</p><img src="/runs/${id}/${c.chip}" alt="before, after and colour change for cell ${c.id}">
+      ${c.chip_later ? `<img src="/runs/${id}/${c.chip_later}" alt="the same cell weeks later">` : ""}
+      <div class="trace">${traceText(c)}</div>${rv}${acts}</li>`;
+  }).join("");
+  $("#cellList").querySelectorAll("li").forEach((li) => {
+    li.querySelector(".head").onclick = () => map.flyTo({ center: [+li.dataset.lon, +li.dataset.lat], zoom: 14.5 });
+    li.querySelectorAll("img").forEach((im) => im.onclick = () => window.open(im.src));
+    li.querySelectorAll(".acts button").forEach((b) => b.onclick = async () => {
+      await fetch(`/api/runs/${id}/inspection/${li.dataset.id}`, { method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision: b.dataset.d }) });
+      loadInspection(id);
+    });
+  });
+  drawCells(res);
+}
+$("#inspectBtn").onclick = async () => {
+  if (!state.runId) return;
+  await fetch(`/api/runs/${state.runId}/inspect`, { method: "POST" });
+  loadInspection(state.runId);
+};
+
+
+// ---------------------------------------------------------------- proof
+const short = (h) => h ? h.slice(0, 10) + "…" + h.slice(-6) : "–";
+async function loadProof(id) {
+  state.proof = null;
+  $("#verifyLog").textContent = "";
+  $("#proofInfo").innerHTML = "<p>Loading…</p>";
+  const p = await fetch(`/api/runs/${id}/proof`).then((r) => r.json()).catch(() => null);
+  if (!p || p.detail) { $("#proofInfo").innerHTML = "<p>No proof for this run.</p>"; return; }
+  state.proof = p;
+  const c = p.chain, pub = p.anchors.find((a) => a.kind === "published");
+  const ledgerLine = !c ? "No public ledger configured on this server."
+    : !c.published ? `Not anchored yet on ${c.network}.`
+    : `${c.final ? "✓ <b>Final</b>" : c.disputed ? "⚠ <b>Disputed</b>" : "… <b>Anchored, awaiting confirmation</b>"} on ${c.network} ·
+       ${c.confirmations}/${c.quorum} independent confirmations` +
+      (pub?.tx_url ? ` · <a href="${pub.tx_url}" target="_blank">transaction</a>` : "") +
+      (c.registry_url ? ` · <a href="${c.registry_url}" target="_blank">registry</a>` : "");
+  $("#proofInfo").innerHTML = `<p><b>Report root</b> <code>${short(p.report_root)}</code> · ${p.files.length} files</p>
+    <p><b>Claims root</b> <code>${short(p.claims_root)}</code> · ${p.settlements.length} settlements</p>
+    <p><b>Code</b> <code>${p.code_version.slice(0, 12)}</code></p><p>${ledgerLine}</p>`;
+  const lbl = ["reachable", "partly cut", "cut off"];
+  const ss = [...p.settlements].sort((a, b) => b.status - a.status || b.people_stranded - a.people_stranded);
+  $("#claimsList").innerHTML = ss.slice(0, 40).map((s) => `<li data-lon="${s.lon_e5 / 1e5}" data-lat="${s.lat_e5 / 1e5}">
+    <span>${s.name}<br><small>${s.people_stranded} people stranded · leaf ${short(s.leaf)} · proof ${s.proof.length} hashes</small></span>
+    <span class="pill ${["mute", "warn", ""][s.status]}">${lbl[s.status]}</span></li>`).join("");
+  $("#claimsList").querySelectorAll("li").forEach((li) => li.onclick = () => map.flyTo({ center: [+li.dataset.lon, +li.dataset.lat], zoom: 15 }));
+}
+$("#verifyBtn").onclick = async () => {
+  if (!state.proof) return;
+  const out = $("#verifyLog"); out.textContent = "";
+  const log = (t) => { out.textContent += t + "\n"; };
+  $("#verifyBtn").disabled = true;
+  try { await WGProof.verifyInBrowser(state.runId, state.proof, state.proof.chain, log); }
+  catch (e) { log("Error: " + e.message); }
+  $("#verifyBtn").disabled = false;
+};
 document.querySelectorAll(".tabs button").forEach((b) => b.onclick = () => {
   document.querySelectorAll(".tabs button").forEach((x) => x.setAttribute("aria-selected", x === b));
   document.querySelectorAll(".tab").forEach((t) => t.hidden = t.id !== "tab-" + b.dataset.tab);
@@ -282,7 +388,15 @@ async function openRun(id) {
   }
 }
 loadPast();
-const deep = new URLSearchParams(location.search).get("run");
-if (deep) { if (map.loaded()) openRun(deep); else map.once("load", () => openRun(deep)); }
+const params = new URLSearchParams(location.search), deep = params.get("run");
+async function openDeep() {
+  await openRun(deep);
+  if (params.get("verify")) {
+    document.querySelector('.tabs button[data-tab="proof"]').click();
+    for (let i = 0; i < 50 && !state.proof; i++) await new Promise((r) => setTimeout(r, 200));
+    $("#verifyBtn").click();
+  }
+}
+if (deep) { if (map.loaded()) openDeep(); else map.once("load", openDeep); }
 window.addEventListener("error", (e) => console.log("ERR", e.message, e.filename, e.lineno));
 window.addEventListener("unhandledrejection", (e) => console.log("REJ", e.reason && (e.reason.stack || e.reason)));

@@ -55,6 +55,33 @@ def _plain(o):
     return str(o)
 
 
+EVIDENCE_BANDS = ("red_pre", "green_pre", "blue_pre", "red_post", "green_post", "blue_post", "ndvi_pre", "ndvi_post",
+                  "ndwi_pre", "ndwi_post", "sar_z", "hand_m", "source")
+EVIDENCE_SCALE = {"sar_z": 1000, "hand_m": 10, "source": 1}     # everything else x 10000
+
+
+def _save_evidence(path, grid, T, S, O, D):
+    """The per-pixel evidence behind the impact map, for later inspection (waterguard/vision.py).
+    int16, scaled; -32768 = no data."""
+    nan = np.full(grid.shape, np.nan, "float32")
+    have = O is not None and O.rgb_pre is not None
+    layers = {
+        "red_pre": O.rgb_pre[0] if have else nan, "green_pre": O.rgb_pre[1] if have else nan,
+        "blue_pre": O.rgb_pre[2] if have else nan, "red_post": O.rgb_post[0] if have else nan,
+        "green_post": O.rgb_post[1] if have else nan, "blue_post": O.rgb_post[2] if have else nan,
+        "ndvi_pre": O.ndvi_pre if O is not None else nan, "ndvi_post": O.ndvi_post if O is not None else nan,
+        "ndwi_pre": O.ndwi_pre if O is not None else nan, "ndwi_post": O.ndwi_post if O is not None else nan,
+        "sar_z": S.z, "hand_m": T["hand"], "source": D["evidence_source"].astype("float32"),
+    }
+    stack = np.stack([np.where(np.isfinite(layers[b]), np.clip(np.round(layers[b] * EVIDENCE_SCALE.get(b, 10000)),
+                                                              -32767, 32767), -32768).astype("int16")
+                      for b in EVIDENCE_BANDS])
+    grid.save(path, stack, nodata=-32768)
+    import rasterio
+    with rasterio.open(path, "r+") as ds:
+        ds.descriptions = EVIDENCE_BANDS
+
+
 def _png(path, rgba, grid):
     import cv2
     cv2.imwrite(str(path), cv2.cvtColor(rgba, cv2.COLOR_RGBA2BGRA))
@@ -121,7 +148,23 @@ def _sitrep_map(path, grid, O, classes, dmg, settlements, bridges, max_px=1100):
     cv2.imwrite(str(path), img)
 
 
-def run(bbox, event, out_dir: Path | None = None, progress=lambda msg, pct: None) -> dict:
+def _apply_veto(D, veto):
+    """Analyst-removed inspection cells (waterguard/inspector.py) are cleared from the impact map."""
+    m = np.zeros(D["impact"].shape, bool)
+    for v in veto:
+        (r0, r1), (c0, c1) = v["rows"], v["cols"]
+        m[r0:r1, c0:c1] = True
+    cls = D["classes"]
+    D["impact"] = D["impact"] & ~m
+    cls[m & np.isin(cls, (1, 2, 3))] = 0
+    st = D["stats"]
+    st["impact_ha"] = round(float(D["impact"].sum()) * 0.01, 1)
+    st["new_water_ha"] = round(float((cls == 2).sum()) * 0.01, 1)
+    st["riverbed_lower_confidence_ha"] = round(float((cls == 3).sum()) * 0.01, 1)
+    return D
+
+
+def run(bbox, event, out_dir: Path | None = None, progress=lambda msg, pct: None, veto: list | None = None) -> dict:
     t0 = time.time()
     event = as_utc(event)
     bbox = tuple(float(v) for v in bbox)
@@ -168,6 +211,10 @@ def run(bbox, event, out_dir: Path | None = None, progress=lambda msg, pct: None
 
     step("impact map (OpenCV)", 72)
     D = detect.impact_map(T, S, O, built)
+    if veto:
+        before = float(D["impact"].sum())
+        D = _apply_veto(D, veto)
+        D["stats"]["removed_by_analyst_ha"] = round((before - float(D["impact"].sum())) * 0.01, 1)
     impact = damage.vectorize(D["impact"], grid)
 
     step("damage overlay", 80)
@@ -190,6 +237,7 @@ def run(bbox, event, out_dir: Path | None = None, progress=lambda msg, pct: None
         (out / "roads_cut.geojson").write_text('{"type":"FeatureCollection","features":[]}')
     S_ = acc["settlements"].copy()
     _to_geojson(S_, out / "settlements.geojson")
+    _save_evidence(out / "evidence.tif", grid, T, S, O, D)
 
     # imagery overlays for the dashboard
     overlays = {}
@@ -283,6 +331,7 @@ def run(bbox, event, out_dir: Path | None = None, progress=lambda msg, pct: None
             "sar_z_min": detect.Z_MIN, "buffer_possible_m": damage.BUFFER_M,
         },
         "overlays": overlays,
+        "analyst_review": {"removed_cells": [v["id"] for v in veto]} if veto else None,
         "terrain_workdir": str(T["workdir"]),
         "timings_s": timings,
     }

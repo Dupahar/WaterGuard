@@ -55,6 +55,8 @@
       <button role="tab" data-tab="ask">Ask</button>
       <button role="tab" data-tab="report">Report</button>
       <button role="tab" data-tab="basis">Basis</button>
+      <button role="tab" data-tab="inspect">Inspect</button>
+      <button role="tab" data-tab="proof">Proof</button>
     </div>
     <div class="tab" id="tab-cut"></div>
     <div class="tab" id="tab-bridges" hidden></div>
@@ -77,9 +79,26 @@
       <div id="traceOut"></div>
     </div>
     <div class="tab" id="tab-basis" hidden></div>
+    <div class="tab" id="tab-inspect" hidden>
+      <p>An inspector agent looks again at every part of the map that matters, most exposed first. It measures each 600 m cell against nearby unflagged ground (OpenCV: co-registration, colour, structure, texture, vegetation, radar), fetches a fresh later image where clouds or mixed evidence leave doubt, and confirms only what several independent lines agree on. Everything else comes to you.</p>
+      <div class="row"><button id="inspectBtn" class="ghost">🛰️ Run inspector agent</button><span id="inspectState" class="bbox"></span></div>
+      <div class="tiles" id="inspectTiles"></div>
+      <div id="publishGate" class="basis"></div>
+      <ul class="cells" id="cellList"></ul>
+    </div>
+    <div class="tab" id="tab-proof" hidden>
+      <p>Every report is fingerprinted: one Merkle root over all its files, one over the road status of every settlement. Once anchored on a public ledger, nobody (including us) can change a number without it showing.</p>
+      <div id="proofInfo" class="basis"></div>
+      <button id="verifyBtn" class="ghost">🔍 Verify in my browser</button>
+      <div id="verifyLog" class="vlog"></div>
+      <h4>Settlement claims</h4>
+      <p><small>What relief funds can pay against. Each line can be proven on-chain without revealing the rest.</small></p>
+      <ul class="list" id="claimsList"></ul>
+    </div>
   </section>
   <footer class="attrib">Contains modified Copernicus Sentinel data 2026 · Copernicus WorldDEM-30 © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018, provided under COPERNICUS by the EU and ESA · © OpenStreetMap contributors. Educational prototype, not an operational tool.</footer>
 </aside>
+<script src="proof.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

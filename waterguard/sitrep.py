@@ -5,6 +5,7 @@ computed by the pipeline. It is printable (A4) HTML; the dashboard links to it.
 """
 import html
 import json
+import os
 import re
 from datetime import datetime
 
@@ -36,6 +37,9 @@ T = {
                       "clouds hide optical images. Damage = buildings on or within 20 m of mapped impact. People = buildings × 4.37 "
                       "(Nepal census 2021 household size). Roads/settlements are from OpenStreetMap before the event and may be incomplete.",
         "none": "None found.",
+        "verify": "Verify this report",
+        "verify_txt": "Every number above comes from files fingerprinted by these two roots. Scan the code to re-check them in any browser against the public ledger.",
+        "not_anchored": "Not yet anchored on a public ledger.",
         "legend": "Map: Sentinel-2 after the flood. Orange = flood/debris impact, yellow = riverbed bare before (lower confidence), blue = new water, red lines = roads in impact, "
                   "✕ = bridge likely damaged, dots = settlements (red cut off, yellow partly cut, green connected).",
     },
@@ -60,6 +64,9 @@ T = {
                       "अप्टिकल तस्बिर छोप्छ। क्षति = नक्साङ्कित असरमा वा २० मिटरभित्रका घर। मानिस = घर × ४.३७ (राष्ट्रिय जनगणना २०७८ को "
                       "औसत परिवार आकार)। सडक र बस्ती घटनाअघिको ओपनस्ट्रिटम्यापबाट लिइएका हुन्, अपूर्ण हुन सक्छन्।",
         "none": "भेटिएन।",
+        "verify": "यो प्रतिवेदन जाँच्नुहोस्",
+        "verify_txt": "माथिका सबै अङ्क यी दुई रुट (फिङ्गरप्रिन्ट) ले बाँधिएका फाइलबाट आएका हुन्। कोड स्क्यान गरी जुनसुकै ब्राउजरमा सार्वजनिक लेजरसँग दाँज्न सकिन्छ।",
+        "not_anchored": "सार्वजनिक लेजरमा अझै दर्ता भएको छैन।",
         "legend": "नक्सा: बाढीपछिको सेन्टिनेल-२ तस्बिर। सुन्तला = बाढी/लेदो असर, पहेँलो = पहिले नै खाली नदी किनार (कम निश्चित), नीलो = नयाँ पानी, रातो रेखा = असर क्षेत्रभित्रको सडक, "
                   "✕ = सम्भवतः क्षतिग्रस्त पुल, थोप्लाहरू = बस्ती (रातो सम्पर्कविहीन, पहेँलो आंशिक, हरियो जोडिएको)।",
     },
@@ -76,6 +83,27 @@ def _fmt(s: str, d: dict, ne: bool) -> str:
         v = "—" if v is None else (f"{v:,}" if isinstance(v, int) and v >= 10000 else str(v))
         return v.translate(DEV) if ne else v
     return re.sub(r"\{(\w+)\}", rep, s)
+
+
+def _proof_block(run_id: str, L: dict) -> str:
+    p = RUNS_DIR / run_id / "proof.json"
+    if not p.exists():
+        return ""
+    pr = json.loads(p.read_text(encoding="utf-8"))
+    url = f"{os.getenv('WATERGUARD_PUBLIC_URL', 'https://d1sgb39rsg0dlm.cloudfront.net')}/?run={run_id}&verify=1"
+    try:
+        import qrcode
+        import qrcode.image.svg
+        qr = qrcode.make(url, image_factory=qrcode.image.svg.SvgPathImage, box_size=6, border=1).to_string(encoding="unicode")
+        qr = re.sub(r"<\?xml[^>]*>", "", qr).replace("<svg ", '<svg style="width:26mm;height:26mm;flex:none" ', 1)
+    except Exception:
+        qr = ""
+    a = next((x for x in pr.get("anchors", []) if x["kind"] == "published"), None)
+    where = (f"{html.escape(a['network'])} · tx {a['tx'][:18]}… · block {a['block']} · {a['utc']}" if a
+             else L["not_anchored"])
+    return (f'<h2>{L["verify"]}</h2><div style="display:flex;gap:10px;align-items:center">{qr}<div class="meta">'
+            f'{L["verify_txt"]}<br>Report root <code>{pr["report_root"]}</code><br>Claims root <code>{pr["claims_root"]}</code>'
+            f'<br>{where}<br>{html.escape(url)}</div></div>')
 
 
 def render(run_id: str, lang: str = "en") -> str:
@@ -127,6 +155,7 @@ td, th {{ border-bottom: 1px solid #ddd; padding: 2px 4px; text-align:left; }} t
 <p class="meta">Sentinel-1 post-event: {s1}. Sentinel-2 post-event (cloud-free pixels): {s2}. Copernicus DEM GLO-30.
 OpenStreetMap snapshot {f['inputs']['osm']['snapshot_time']} ({f['inputs']['osm']['features']} features, 0 edited after snapshot).</p>
 <p class="warn"><b>{L['limits']}:</b> {L['limits_txt']}</p>
+{_proof_block(run_id, L)}
 <div class="foot">{ATTRIB}<br>Educational prototype, not an operational tool.</div>
 </body></html>"""
 
@@ -148,6 +177,18 @@ def offline_answer(tools, q: str, results: list, nepali: bool) -> str:
         return (f"सम्भवतः क्षतिग्रस्त पुल: {n(r['count_likely_damaged'])}, क्षति हुन सक्ने: {n(r['count_possibly_damaged'])}। {names}"
                 if nepali else f"Bridges likely damaged: {r['count_likely_damaged']}, possibly damaged: "
                                f"{r['count_possibly_damaged']}. {names}")
+    if any(k in ql for k in ("verif", "proof", "trust", "tamper", "ledger", "blockchain", "anchor", "प्रमाण", "विश्वास")):
+        r = use("report_proof")
+        L = r.get("ledger")
+        if not L or not L["anchored"]:
+            return ("यो प्रतिवेदनको फिङ्गरप्रिन्ट बनेको छ तर सार्वजनिक लेजरमा अझै दर्ता भएको छैन।" if nepali else
+                    f"This report is fingerprinted ({r['files_fingerprinted']} files, {r['settlement_claims']} settlement "
+                    f"claims) but not anchored on a public ledger yet.")
+        state = "final" if L["final"] else "disputed" if L["disputed"] else "awaiting independent confirmation"
+        return (f"{L['network']} मा दर्ता भएको छ। स्वतन्त्र पुष्टि: {n(L['independent_confirmations'])}/{n(L['confirmations_needed'])}।"
+                if nepali else f"Anchored on {L['network']}: {state}, {L['independent_confirmations']} of "
+                               f"{L['confirmations_needed']} independent confirmations. Report root {r['report_root'][:12]}…. "
+                               f"Anyone can re-check it in the Proof tab.")
     if any(k in ql for k in ("health", "hospital", "स्वास्थ्य", "अस्पताल")):
         r = use("health_facilities")
         aff = ", ".join(f"{a['name']} ({a['status']})" for a in r["affected"]) or ("कुनै छैन" if nepali else "none")

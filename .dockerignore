@@ -2,4 +2,5 @@
 !requirements.txt
 !waterguard/
 !web/
+!contracts/
 **/__pycache__

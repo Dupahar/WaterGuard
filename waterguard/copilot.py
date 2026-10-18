@@ -65,6 +65,7 @@ def _clean(obj):
 
 class RunTools:
     def __init__(self, run_id: str):
+        self.run_id = run_id
         self.dir = RUNS_DIR / run_id
         self.facts = json.loads((self.dir / "facts.json").read_text(encoding="utf-8"))
         self._settlements = None
@@ -139,6 +140,23 @@ class RunTools:
         return {"total_in_area": self.facts["damage"]["health_facilities_total"],
                 "affected": self.facts["affected_health_facilities"]}
 
+    def report_proof(self) -> dict:
+        """Is this report tamper-evident and independently confirmed? (public ledger status)"""
+        from . import chain, ledger
+        p = ledger.load(self.run_id) or ledger.build(self.run_id)
+        on = chain.onchain_summary(self.run_id)
+        pub = next((a for a in p.get("anchors", []) if a["kind"] == "published"), None)
+        return _clean({
+            "report_root": p["report_root"], "claims_root": p["claims_root"], "files_fingerprinted": len(p["files"]),
+            "settlement_claims": len(p["settlements"]),
+            "ledger": None if not on else {
+                "network": on["network"], "anchored": on["published"], "independent_confirmations": on["confirmations"],
+                "confirmations_needed": on["quorum"], "final": on["final"], "disputed": on["disputed"],
+                "transaction": pub and pub["tx_url"]},
+            "meaning": "final = enough independent re-runs produced identical settlement claims and nobody disputed "
+                       "them; relief funds can then pay against them automatically.",
+        })
+
     def trace_flood_path(self, lon: float, lat: float) -> dict:
         from .grid import Grid
         wd = Path(self.facts["terrain_workdir"])
@@ -172,6 +190,8 @@ TOOL_SPECS = [
     {"name": "damaged_bridges", "description": "Bridges rated likely or possibly damaged, with names and coordinates.",
      "parameters": {"type": "object", "properties": {}}},
     {"name": "health_facilities", "description": "Health facilities in the area and which are in/near the impact zone.",
+     "parameters": {"type": "object", "properties": {}}},
+    {"name": "report_proof", "description": "Whether this report is fingerprinted and anchored on a public ledger, how many independent re-runs confirmed it, and whether relief funds can pay against it.",
      "parameters": {"type": "object", "properties": {}}},
     {"name": "trace_flood_path", "description": "Trace the flood path downstream from a point (lon, lat) on the elevation model and list settlements along it in order.",
      "parameters": {"type": "object", "properties": {"lon": {"type": "number"}, "lat": {"type": "number"}}, "required": ["lon", "lat"]}},

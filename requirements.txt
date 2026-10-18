@@ -19,5 +19,10 @@ pydantic==2.12.5
 # copilot LLM backends (optional; the copilot works offline without them)
 boto3==1.43.110
 openai==2.21.0
-# tests
+# public ledger (verifiable reports, relief payouts) + QR code on the printed report
+web3==7.14.0
+qrcode==8.0
+# tests; contract compiler + in-memory EVM for tests/test_ledger.py
 pytest==9.0.2
+py-solc-x==2.0.5
+eth-tester[py-evm]==0.14.0b1

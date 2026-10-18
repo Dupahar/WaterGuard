@@ -130,11 +130,69 @@ def false_alarms() -> list:
     return out
 
 
+def inspection_check(aois=(1, 2, 3, 5), control="control tributary (Tadi Khola, real event date)") -> dict:
+    """Run the inspector agent and score its verdicts against EMS: does it confirm only real damage,
+    and does everything EMS did not map reach a human? A cell counts as real damage when >= 50 % of
+    its flagged pixels fall inside EMS observed-event polygons. Tuning: AOI01, AOI02, Tadi Khola."""
+    from . import inspector
+    rows = []
+    jobs = [(a, None) for a in aois] + [(0, next(t for t in FALSE_ALARM_TESTS if t["name"] == control))]
+    for aoi, t in jobs:
+        if aoi:
+            A = gpd.read_file(VAL / "aois.geojson")
+            A = A[A.aoi == aoi]
+            w, s_, e, n = A.total_bounds
+            facts = run(tuple(round(v, 3) for v in (w - PAD_DEG, s_ - PAD_DEG, e + PAD_DEG, n + PAD_DEG)), EVENT)
+        else:
+            facts = run(t["bbox"], t["date"])
+        rid = facts["run_id"]
+        res = inspector.inspect(rid, max_cells=10_000, max_fetches=10_000)
+        with rasterio.open(DATA_DIR / "runs" / rid / "impact.tif") as src:
+            cls, tr, crs = src.read(1), src.transform, src.crs
+        pred = np.isin(cls, (1, 2, 3))
+        if aoi:
+            ref = rasterize([(g, 1) for g in _layers(aoi, "observedEventA").to_crs(crs).geometry],
+                            out_shape=cls.shape, transform=tr) > 0
+            sel = rasterize([(g, 1) for g in A.to_crs(crs).geometry], out_shape=cls.shape, transform=tr) > 0
+        for c in res["cells"]:
+            (r0, r1), (c0, c1) = c["rows"], c["cols"]
+            M = pred[r0:r1, c0:c1]
+            if aoi and (sel[r0:r1, c0:c1] & M).sum() < 0.8 * M.sum():
+                continue            # mostly outside the area EMS analysed: cannot be scored
+            real = bool(aoi) and float(ref[r0:r1, c0:c1][M].mean()) >= 0.5
+            rows.append({"area": aoi or "Tadi Khola", "split": "tuning" if aoi in (0, 1, 2) else "held-out",
+                         "verdict": c["verdict"], "real": real, "ha": c["impact_ha"],
+                         "later_look": c["later"] is not None})
+    df = pd.DataFrame(rows)
+    out = {}
+    for split, g in df.groupby("split"):
+        real, fake = g[g.real], g[~g.real]
+        conf = g[g.verdict == "confirmed"]
+        out[split] = {
+            "cells": int(len(g)), "cells_real_damage": int(len(real)), "cells_not_in_ems": int(len(fake)),
+            "confirmed_cells": int(len(conf)),
+            "confirmed_that_are_real_pct": round(100 * conf.real.mean(), 1) if len(conf) else None,
+            "real_damage_ha_auto_confirmed_pct": round(100 * real[real.verdict == "confirmed"].ha.sum() / max(real.ha.sum(), 1e-9), 1),
+            "not_in_ems_ha_sent_to_human_pct": round(100 * fake[fake.verdict != "confirmed"].ha.sum() / max(fake.ha.sum(), 1e-9), 1)
+                                               if len(fake) else None,
+            "analyst_workload_cells": int((g.verdict != "confirmed").sum()),
+            "later_looks": int(g.later_look.sum()),
+        }
+    out["per_area"] = df.groupby(["area", "verdict"]).agg(cells=("ha", "size"), ha=("ha", "sum")).round(1).reset_index().to_dict("records")
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--aoi", nargs="+", type=int, default=[1, 2, 3, 5])
     ap.add_argument("--no-false-alarm", action="store_true")
+    ap.add_argument("--inspection", action="store_true", help="score the inspector agent (docs/validation_inspector.json)")
     a = ap.parse_args()
+    if a.inspection:
+        r = inspection_check()
+        (ROOT / "docs" / "validation_inspector.json").write_text(json.dumps(r, indent=1))
+        print(json.dumps(r, indent=1))
+        return
     results = [check_aoi(i) for i in a.aoi]
     if not a.no_false_alarm:
         results.append({"false_alarm_tests": false_alarms()})
