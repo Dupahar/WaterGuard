@@ -12,6 +12,9 @@ RUN pip install -r requirements.txt \
 COPY waterguard/ waterguard/
 COPY web/ web/
 COPY contracts/ contracts/
+# the container has no git history: the analysis-code version that names reports on the ledger
+ARG WATERGUARD_VERSION
+ENV WATERGUARD_VERSION=${WATERGUARD_VERSION}
 
 EXPOSE 8000
 CMD ["uvicorn", "waterguard.server:app", "--host", "0.0.0.0", "--port", "8000"]

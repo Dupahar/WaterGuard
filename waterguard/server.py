@@ -164,6 +164,8 @@ def proof(rid: str):
 
 
 INSPECT: dict = {}
+# On a shared public demo, analyst decisions would let any visitor edit the review queue for everyone.
+READONLY_REVIEW = os.getenv("WATERGUARD_READONLY_REVIEW", "") == "1"
 
 
 @app.post("/api/runs/{rid}/inspect")
@@ -197,11 +199,13 @@ def get_inspection(rid: str):
     if res is None:
         raise HTTPException(404, "not inspected")
     ok, why = inspector.ready_to_publish(rid)
-    return {"job": job, "result": res, "ready_to_publish": ok, "publish_status": why}
+    return {"job": job, "result": res, "ready_to_publish": ok, "publish_status": why, "readonly_review": READONLY_REVIEW}
 
 
 @app.post("/api/runs/{rid}/inspection/{cell}")
 def review_cell(rid: str, cell: str, req: ReviewReq):
+    if READONLY_REVIEW:
+        raise HTTPException(403, "Analyst review is read-only on the public demo. Run WaterGuard locally to review cells.")
     try:
         s = inspector.review(rid, cell, req.decision, note=req.note)
     except (KeyError, ValueError, TypeError) as e:
@@ -211,6 +215,8 @@ def review_cell(rid: str, cell: str, req: ReviewReq):
 
 @app.post("/api/runs/{rid}/apply-review")
 def apply_review(rid: str):
+    if READONLY_REVIEW:
+        raise HTTPException(403, "Analyst review is read-only on the public demo. Run WaterGuard locally to review cells.")
     ok, why = inspector.ready_to_publish(rid)
     if not ok:
         raise HTTPException(409, why)

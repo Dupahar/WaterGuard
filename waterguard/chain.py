@@ -14,7 +14,7 @@
     python -m waterguard.chain claim <run_id> <fund_id>        pay every eligible settlement in the run
     python -m waterguard.chain resolve <report_key> upheld|rejected   owner settles a dispute
 
-.env:  WATERGUARD_CHAIN_RPC   (default: Polygon Amoy public RPC)
+.env:  WATERGUARD_CHAIN_RPC   (default: Ethereum Sepolia public RPC)
        WATERGUARD_LEDGER_KEY  private key of the publishing account
        WATERGUARD_VERIFIER_KEY  (optional) a second party's key, used with --as-verifier
 Contract addresses live in contracts/deployments/<chain_id>.json once deployed.
@@ -36,7 +36,7 @@ NETWORKS = {
                "rpc": "https://ethereum-sepolia-rpc.publicnode.com"},
     84532: {"name": "Base Sepolia", "explorer": "https://sepolia.basescan.org", "rpc": "https://sepolia.base.org"},
 }
-DEFAULT_RPC = NETWORKS[80002]["rpc"]
+DEFAULT_RPC = NETWORKS[11155111]["rpc"]     # where the contracts are deployed (contracts/deployments/)
 
 
 def compile_contracts() -> dict:

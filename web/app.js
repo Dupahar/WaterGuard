@@ -233,11 +233,14 @@ async function loadInspection(id) {
   if (running) setTimeout(() => state.runId === id && loadInspection(id), 2000);
   if (!res || running) { if (!res) { state.inspection = null; $("#inspectTiles").innerHTML = ""; $("#cellList").innerHTML = ""; $("#publishGate").innerHTML = ""; drawCells(null); } return; }
   state.inspection = res;
+  state.readonly = !!r.readonly_review;
   const s = res.summary;
   $("#inspectTiles").innerHTML = [["", s.confirmed, `cells confirmed (${s.confirmed_ha} ha)`], ["warn", s.pending_review, "cells waiting for you"],
     ["", res.later_looks, "later images fetched"], ["crit", s.removed_by_analyst, "removed by analyst"]]
     .map(([c, v, t]) => `<div class="tile ${c}"><b>${fmt(v)}</b><span>${t}</span></div>`).join("");
-  $("#publishGate").innerHTML = r.ready_to_publish
+  $("#publishGate").innerHTML = r.readonly_review && !r.ready_to_publish
+    ? `<p>⏸ ${r.publish_status}. On this public demo the review queue is read-only.</p>`
+    : r.ready_to_publish
     ? `<p>✓ Every cell is confirmed or reviewed. <button id="applyBtn" class="ghost">Apply review &amp; fingerprint</button></p>`
     : `<p>⏸ ${r.publish_status}: the report is not anchored until you decide.</p>`;
   if ($("#applyBtn")) $("#applyBtn").onclick = async () => {
@@ -250,7 +253,9 @@ async function loadInspection(id) {
   $("#cellList").innerHTML = cells.map((c) => {
     const [cls, label] = VERDICT[c.verdict];
     const rv = c.review ? `<p class="why">Analyst: <b>${c.review.decision}</b>${c.review.note ? " · " + c.review.note : ""}</p>` : "";
-    const acts = c.verdict !== "confirmed" && !c.review
+    const acts = c.verdict !== "confirmed" && !c.review && state.readonly
+      ? `<p class="why">⏸ Waiting for an analyst (read-only on this public demo)</p>`
+      : c.verdict !== "confirmed" && !c.review
       ? `<div class="acts"><button class="keep" data-d="keep">Keep: real damage</button><button class="remove" data-d="remove">Remove: not flood</button></div>` : "";
     return `<li data-id="${c.id}" data-lon="${c.lon}" data-lat="${c.lat}">
       <div class="head"><span><b>${c.impact_ha} ha</b> · ${c.buildings_hit} buildings · ${c.road_segments_cut} road segments · ~${fmt(c.people_nearby_est)} people nearby</span><span class="pill ${cls}">${label}</span></div>
@@ -269,7 +274,9 @@ async function loadInspection(id) {
 function cellCard(id, c, big) {
   const [cls, label] = VERDICT[c.verdict];
   const rv = c.review ? `<p class="why">Analyst: <b>${c.review.decision}</b>${c.review.note ? " · " + c.review.note : ""}</p>` : "";
-  const acts = c.verdict !== "confirmed" && !c.review
+  const acts = c.verdict !== "confirmed" && !c.review && state.readonly
+    ? `<p class="why">⏸ Waiting for an analyst. (Reviews are read-only on this public demo.)</p>`
+    : c.verdict !== "confirmed" && !c.review
     ? `<div class="acts"><button class="keep" data-d="keep" data-id="${c.id}">Keep: real damage</button><button class="remove" data-d="remove" data-id="${c.id}">Remove: not flood</button></div>` : "";
   return `<h3>${c.impact_ha} ha · ${c.buildings_hit} buildings · ${c.road_segments_cut} road segments cut <span class="pill ${cls}">${label}</span></h3>
     <p class="why">${c.reason}</p>
