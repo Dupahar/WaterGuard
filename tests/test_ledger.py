@@ -89,7 +89,7 @@ def test_tampering_is_detected(run_dir):
 def test_publish_confirm_and_relief(run_dir, net):
     op, ver, donor, w3 = net["op"], net["verifier"], net["donor"], net["w3"]
     op.add_verifier(ver.acct.address)
-    op.publish(RID)
+    op.publish(RID, skip_review=True)
     assert op.status(RID)["published"] and not op.status(RID)["final"]
 
     fund = donor.open_fund(BBOX, "2026-08-01", "2026-09-30", per_person_wei=10**15, cap_wei=ETH // 2,
@@ -118,7 +118,7 @@ def test_publish_confirm_and_relief(run_dir, net):
 def test_forged_claim_rejected(run_dir, net):
     op, ver, w3 = net["op"], net["verifier"], net["w3"]
     op.add_verifier(ver.acct.address)
-    p = op.publish(RID) and ledger.load(RID)
+    p = op.publish(RID, skip_review=True) and ledger.load(RID)
     ver.confirm(RID)
     _travel(w3, 3601)
     fund = op.open_fund(BBOX, "2026-08-01", "2026-09-30", 10**15, ETH, net["partner"].address, 5 * ETH)["fund_id"]
@@ -132,7 +132,7 @@ def test_forged_claim_rejected(run_dir, net):
 def test_disagreeing_verifier_blocks_payout(run_dir, net):
     op, ver, w3 = net["op"], net["verifier"], net["w3"]
     op.add_verifier(ver.acct.address)
-    op.publish(RID)
+    op.publish(RID, skip_review=True)
     # the verifier's own re-run finds Timure still reachable
     gj = json.loads((run_dir / "settlements.geojson").read_text())
     gj["features"][0]["properties"].update(vehicle_status="ok", vehicle_stranded_share=0.0)
@@ -146,4 +146,4 @@ def test_disagreeing_verifier_blocks_payout(run_dir, net):
 def test_only_verifiers_publish(run_dir, net):
     stranger = net["as"](net["accts"][2])
     with pytest.raises(Exception):
-        stranger.publish(RID)
+        stranger.publish(RID, skip_review=True)

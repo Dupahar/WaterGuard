@@ -157,7 +157,11 @@ class Ledger:
                                                               encoding="utf-8")
         return a
 
-    def publish(self, run_id: str) -> dict:
+    def publish(self, run_id: str, skip_review: bool = False) -> dict:
+        from . import inspector
+        ok, why = inspector.ready_to_publish(run_id)
+        if not ok and not skip_review:
+            raise RuntimeError(f"not publishing: {why} (review them in the dashboard's Inspect tab)")
         p = ledger.build(run_id)
         st = self.status(run_id)
         if st["published"]:
@@ -275,6 +279,7 @@ def main():
     ap.add_argument("--partner")
     ap.add_argument("--deposit-wei", type=int, default=0)
     ap.add_argument("--rerun", action="store_true")
+    ap.add_argument("--skip-review", action="store_true", help="publish although inspected cells await an analyst")
     ap.add_argument("--as-verifier", action="store_true")
     a = ap.parse_args()
 
@@ -289,7 +294,7 @@ def main():
     lg = Ledger(key=os.getenv("WATERGUARD_VERIFIER_KEY") if a.as_verifier else None)
     out = {
         "deploy": lambda: lg.deploy(a.quorum, a.window),
-        "publish": lambda: lg.publish(a.args[0]),
+        "publish": lambda: lg.publish(a.args[0], a.skip_review),
         "confirm": lambda: lg.confirm(a.args[0], a.rerun),
         "status": lambda: lg.status(a.args[0]),
         "add-verifier": lambda: {"tx": lg.add_verifier(a.args[0]).transactionHash.to_0x_hex()},

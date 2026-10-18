@@ -1,0 +1,10 @@
+{
+ "chain_id": 11155111,
+ "network": "Ethereum Sepolia",
+ "ReportRegistry": "0x4Ed7bD30798a9878Daa67FBE5e07B6f0ab9F8d18",
+ "ReliefFund": "0x6aaC76b526cA2a61Da8b5c86a75f8917cA1dedce",
+ "deployer": "0xFFBD69974f22960eE541fe27F9ac3d0ee06E44f8",
+ "quorum": 2,
+ "challenge_window_s": 3600,
+ "deployed_utc": "2026-10-18T15:48:53Z"
+}
