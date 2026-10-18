@@ -156,7 +156,7 @@ td, th {{ border-bottom: 1px solid #ddd; padding: 2px 4px; text-align:left; }} t
 OpenStreetMap snapshot {f['inputs']['osm']['snapshot_time']} ({f['inputs']['osm']['features']} features, 0 edited after snapshot).</p>
 <p class="warn"><b>{L['limits']}:</b> {L['limits_txt']}</p>
 {_proof_block(run_id, L)}
-<div class="foot">{ATTRIB}<br>Educational prototype, not an operational tool.</div>
+<div class="foot">{ATTRIB}</div>
 </body></html>"""
 
 
