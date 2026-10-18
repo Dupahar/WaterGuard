@@ -246,8 +246,6 @@ What a fingerprint does **not** prove: that the satellite analysis is right. It 
 
 **Never used as inputs:** Copernicus EMS, UNOSAT or any other damage maps, or OSM edits made after the event. Every run's OSM snapshot is taken 24 h before the event and audited, and the run fails if any feature was edited later. EMS maps are read **only** by `waterguard/validate.py`, which the pipeline never imports. No training dataset is used. Population is estimated as buildings × 4.37 (Nepal 2021 census average household size), and that assumption is stated wherever the number appears. Dashboard basemaps (Esri) are for display only.
 
-> ⚠️ **Educational prototype, not an operational tool.** Please read the limitations in [docs/REPORT.md](docs/REPORT.md) before trusting it with anything that matters.
-
 ## 🙏 Attribution
 
 - Contains modified Copernicus Sentinel data 2026.
