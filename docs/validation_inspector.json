@@ -1,0 +1,80 @@
+{
+ "held-out": {
+  "cells": 113,
+  "cells_real_damage": 111,
+  "cells_not_in_ems": 2,
+  "confirmed_cells": 64,
+  "confirmed_that_are_real_pct": 98.4,
+  "real_damage_ha_auto_confirmed_pct": 64.1,
+  "not_in_ems_ha_sent_to_human_pct": 39.9,
+  "analyst_workload_cells": 49,
+  "later_looks": 34
+ },
+ "tuning": {
+  "cells": 30,
+  "cells_real_damage": 22,
+  "cells_not_in_ems": 8,
+  "confirmed_cells": 13,
+  "confirmed_that_are_real_pct": 100.0,
+  "real_damage_ha_auto_confirmed_pct": 52.4,
+  "not_in_ems_ha_sent_to_human_pct": 100.0,
+  "analyst_workload_cells": 17,
+  "later_looks": 16
+ },
+ "per_area": [
+  {
+   "area": 1,
+   "verdict": "confirmed",
+   "cells": 7,
+   "ha": 45.9
+  },
+  {
+   "area": 1,
+   "verdict": "needs_review",
+   "cells": 4,
+   "ha": 47.1
+  },
+  {
+   "area": 2,
+   "verdict": "confirmed",
+   "cells": 6,
+   "ha": 55.7
+  },
+  {
+   "area": 2,
+   "verdict": "needs_review",
+   "cells": 5,
+   "ha": 45.2
+  },
+  {
+   "area": 3,
+   "verdict": "confirmed",
+   "cells": 43,
+   "ha": 574.4
+  },
+  {
+   "area": 3,
+   "verdict": "needs_review",
+   "cells": 19,
+   "ha": 199.7
+  },
+  {
+   "area": 5,
+   "verdict": "confirmed",
+   "cells": 21,
+   "ha": 273.5
+  },
+  {
+   "area": 5,
+   "verdict": "needs_review",
+   "cells": 30,
+   "ha": 276.3
+  },
+  {
+   "area": "Tadi Khola",
+   "verdict": "needs_review",
+   "cells": 8,
+   "ha": 21.5
+  }
+ ]
+}
