@@ -99,3 +99,21 @@ def test_llm_cannot_confirm_without_evidence(monkeypatch, scene):
     weak = {"delta_e_contrast": 1, "ndvi_drop_contrast": 0, "ssim_dissimilarity_contrast": 0, "sar_z_contrast": 0,
             "clear_share": 1.0}
     assert P.decide(cell, weak, None, True)[0] == "ask_human"
+
+
+def test_settlement_sampling_ignores_osm_feature_order():
+    """An independent re-run gets OSM features in another order; the reachability sample must not change."""
+    from types import SimpleNamespace
+    import geopandas as gpd
+    from shapely.geometry import Point, box
+    from waterguard import access
+    rng = np.random.default_rng(0)
+    pts = [Point(85.33 + rng.normal(0, 0.002), 28.16 + rng.normal(0, 0.002)) for _ in range(300)]
+    blds = gpd.GeoDataFrame({"osm_id": range(300)}, geometry=[p.buffer(0.00005) for p in pts], crs=4326)
+    places = gpd.GeoDataFrame({"name": ["Syabru Bensi"], "name_ne": [None], "place": ["village"]},
+                              geometry=[Point(85.33, 28.16)], crs=4326)
+    crs = "EPSG:32645"
+    boundary = gpd.GeoSeries([box(85.3, 28.13, 85.36, 28.19)], crs=4326).to_crs(crs).iloc[0]
+    a = access.settlements(SimpleNamespace(places=places, buildings=blds), crs, boundary)
+    b = access.settlements(SimpleNamespace(places=places, buildings=blds.sample(frac=1, random_state=7)), crs, boundary)
+    assert [sorted(s) for s in a["sample"]] == [sorted(s) for s in b["sample"]]

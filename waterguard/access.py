@@ -65,6 +65,10 @@ def settlements(osm, crs, boundary) -> gpd.GeoDataFrame:
     p = p[p.within(boundary)]
     b = osm.buildings.to_crs(crs)
     pts = b.geometry.representative_point()
+    # canonical order: the OSM API returns features in no fixed order, and the reachability sample
+    # below picks buildings by position, so without this an independent re-run samples other houses
+    order = np.lexsort((np.round(pts.y.values, 2), np.round(pts.x.values, 2)))
+    b, pts = b.iloc[order], pts.iloc[order]
     xy = np.c_[pts.x, pts.y]
     rows = []
     # assign buildings to nearest named place within 1 km; cluster the rest

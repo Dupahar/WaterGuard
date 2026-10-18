@@ -58,8 +58,11 @@ def verify(proof: list[bytes], root: bytes, leaf: bytes) -> bool:
     return h == root
 
 
-def report_key(run_id: str) -> bytes:
-    return sha(run_id.encode())
+def report_key(run_id: str, version: str | None = None) -> bytes:
+    """On-chain id of a report: the run (area + event time) AND the code that produced it, so a corrected
+    pipeline publishes a new record instead of colliding with (or silently replacing) an old one, and a
+    verifier only lands on the same record if it runs the same code."""
+    return sha(f"{run_id}@{(version or code_version())[:12]}".encode())
 
 
 def e5(v: float) -> int:
@@ -131,7 +134,8 @@ def build(run_id: str, write: bool = True) -> dict:
     """Both trees for a finished run. Keeps any on-chain receipt already recorded in proof.json."""
     d = RUNS_DIR / run_id
     facts = json.loads((d / "facts.json").read_text(encoding="utf-8"))
-    key = report_key(run_id)
+    version = code_version()
+    key = report_key(run_id, version)
 
     fl = files(d)
     report_root, _ = merkle([bytes.fromhex(f["leaf"][2:]) for f in fl])
@@ -154,12 +158,12 @@ def build(run_id: str, write: bool = True) -> dict:
         "claims_root": "0x" + claims_root.hex(),
         "bbox_e5": [e5(v) for v in facts["area"]["bbox"]],
         "event_time_utc": facts["event_time_utc"],
-        "code_version": old.get("code_version") or code_version(),
+        "code_version": version,
         "files": fl,
         "settlements": st,
         "anchors": old.get("anchors", []),
     }
-    if old and (old.get("report_root"), old.get("claims_root")) != (out["report_root"], out["claims_root"]):
+    if old and (old.get("key"), old.get("report_root"), old.get("claims_root")) != (out["key"], out["report_root"], out["claims_root"]):
         out["anchors"] = []   # the files changed since they were anchored: old receipts no longer apply
     if write:
         (d / "proof.json").write_text(json.dumps(out, indent=1, ensure_ascii=False), encoding="utf-8")

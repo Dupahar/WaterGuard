@@ -10,8 +10,9 @@
     python -m waterguard.chain status <run_id>
     python -m waterguard.chain add-verifier <address>
     python -m waterguard.chain open-fund --bbox W S E N --from 2026-08-01 --to 2026-09-30 --per-person-wei N
-                                         --cap-wei N --partner 0x.. [--deposit-wei N]
+                                         --cap-wei N --partner 0x.. [--deposit-wei N] [--min-status 1|2]
     python -m waterguard.chain claim <run_id> <fund_id>        pay every eligible settlement in the run
+    python -m waterguard.chain resolve <report_key> upheld|rejected   owner settles a dispute
 
 .env:  WATERGUARD_CHAIN_RPC   (default: Polygon Amoy public RPC)
        WATERGUARD_LEDGER_KEY  private key of the publishing account
@@ -133,6 +134,11 @@ class Ledger:
             (DEPLOYMENTS / f"{self.chain_id}.json").write_text(json.dumps(self.dep, indent=1), encoding="utf-8")
         self.registry, self.relief = self._contract("ReportRegistry"), self._contract("ReliefFund")
         return self.dep
+
+    def resolve(self, key: str, upheld: bool) -> dict:
+        """Owner settles a dispute. upheld=True: the report can never back a payout."""
+        rc = self._send(self.registry.functions.resolveDispute(b32(key), upheld))
+        return {"tx": rc.transactionHash.to_0x_hex(), "tx_url": self.tx_url(rc.transactionHash.to_0x_hex())}
 
     def add_verifier(self, addr, allowed=True):
         return self._send(self.registry.functions.setVerifier(addr, allowed))
@@ -285,6 +291,7 @@ def main():
     ap.add_argument("--cap-wei", type=int)
     ap.add_argument("--partner")
     ap.add_argument("--deposit-wei", type=int, default=0)
+    ap.add_argument("--min-status", type=int, default=2, help="1 = pay partly cut settlements too, 2 = cut off only")
     ap.add_argument("--rerun", action="store_true")
     ap.add_argument("--skip-review", action="store_true", help="publish although inspected cells await an analyst")
     ap.add_argument("--as-verifier", action="store_true")
@@ -306,8 +313,9 @@ def main():
         "status": lambda: lg.status(a.args[0]),
         "add-verifier": lambda: {"tx": lg.add_verifier(a.args[0]).transactionHash.to_0x_hex()},
         "open-fund": lambda: lg.open_fund(a.bbox, a.start, a.end, a.per_person_wei, a.cap_wei, a.partner,
-                                          a.deposit_wei),
+                                          a.deposit_wei, a.min_status),
         "claim": lambda: lg.claim(a.args[0], int(a.args[1])),
+        "resolve": lambda: lg.resolve(a.args[0], a.args[1] == "upheld"),
     }[a.cmd]()
     print(json.dumps(out, indent=1, default=str))
 
