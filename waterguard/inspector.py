@@ -2,14 +2,20 @@
 
     python -m waterguard.inspector <run_id> [--max-cells 40] [--planner rules|llm]
 
-A loop of perception -> decision -> action per inspection cell (600 m), most exposed first:
+A loop of perception -> decision -> action per inspection cell (600 m), most exposed first, repeated
+until the cell is settled (at most MAX_STEPS tool calls):
 
-  perceive   vision.measure(): co-registration, colour / structure / texture / vegetation / radar
-             contrast against nearby unflagged ground, edge artefacts, patch shape (OpenCV 5)
-  decide     how many independent lines of evidence agree, and whether the sky was clear enough
-  act        confirm the cell                         (strong, multi-sensor agreement)
+  perceive   vision.measure(): ECC co-registration, colour / structure / texture / vegetation / radar
+             contrast against nearby unflagged ground, dense-flow residual misalignment, edge
+             artefacts, patch shape (OpenCV 5)
+  decide     how many independent lines of evidence agree, whether the images line up, and whether
+             the sky was clear enough
+  act        realign:    the images do not line up: re-align on SIFT keypoints with USAC MAGSAC++
+                         (robust to the changed ground) and measure again
+             zoom:       evidence is mixed: measure the cell's four 300 m quadrants separately
              look_later: fetch a fresh cloud-free Sentinel-2 composite of just this cell weeks later
                          and measure again (debris persists; wet soil, turbid water, green-up fade)
+             confirm:    strong, multi-sensor agreement
              ask_human:  send the chip and the measurements to an analyst queue
              flag:       likely false alarm (change reverted); a human still makes the call
 
@@ -29,7 +35,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import vision
+from . import telemetry, vision
 from .pipeline import RUNS_DIR
 
 # evidence lines: a flagged cell vs unflagged valley ground nearby (set on AOI01 + AOI02 + Tadi Khola control)
@@ -44,6 +50,10 @@ PERSIST_DELTA_E = 8.0       # colour contrast still there weeks later
 REVERTED_DELTA_E = 4.0      # ... or gone, and the vegetation is back
 REVERTED_NDVI = 0.03
 MAX_FETCHES = 40
+MAX_STEPS = 4               # tool calls per cell; after that it goes to a person
+MISALIGNED_PX = 1.5         # dense-flow shift left over unflagged ground that calls for a re-alignment
+ZOOM_MIN_LINES = 2          # mixed evidence worth a closer look
+ZOOM_CONFIRM_SHARE = 0.6    # quadrants where all four lines agree must hold this share of the flagged ground
 
 
 def lines(m: dict) -> dict:
@@ -63,26 +73,71 @@ def persistence(later: dict) -> str:
     return "unclear"
 
 
+def misaligned(m: dict) -> bool:
+    """Clear enough to judge, and ECC did not lock on or the dense flow over unflagged ground still shows a shift."""
+    if (m.get("clear_share") or 0) < CLOUDY:
+        return False
+    return m.get("coreg_shift_px") is None or (m.get("residual_flow_px") or 0) > MISALIGNED_PX
+
+
+def strong_parts(parts: list) -> tuple[list, float]:
+    """Quadrants where all four lines agree, and their share of the cell's flagged ground."""
+    tot = sum(p["impact_ha"] for p in parts)
+    strong = [p for p in parts if sum(lines(p["measurements"]).values()) >= CONFIRM_LINES]
+    return [p["part"] for p in strong], (sum(p["impact_ha"] for p in strong) / tot if tot else 0.0)
+
+
+def can_confirm(s: dict) -> bool:
+    """The evidence bar for 'confirmed', whoever plans (rules or a language model)."""
+    n = sum(lines(s["m"]).values())
+    if n >= CONFIRM_LINES:
+        return True
+    if s.get("zoom") and strong_parts(s["zoom"])[1] >= ZOOM_CONFIRM_SHARE:
+        return True
+    later = s.get("later")
+    cloudy = (s["m"].get("clear_share") or 0) < CLOUDY
+    return bool(later) and persistence(later) == "persists" and (n >= LATER_LINES or (cloudy and n >= 2))
+
+
+def _names(L, yes=True):
+    return ", ".join(k for k, x in L.items() if x == yes) or "none"
+
+
 class RulePlanner:
+    """s = the cell's state: m (latest measurements), realign (None | 'ok' | 'failed'),
+    zoom (None | quadrant measurements), later (None | measurements of a later image), can_fetch."""
     name = "rules"
 
-    def decide(self, cell, m, later, can_fetch):
+    def decide(self, cell, s):
+        m, later = s["m"], s.get("later")
         L = lines(m)
         n = sum(L.values())
         cloudy = (m.get("clear_share") or 0) < CLOUDY
         if later is None:
             if n >= CONFIRM_LINES:
-                return "confirm", f"all {n} evidence lines agree ({', '.join(k for k, x in L.items() if x)})"
+                return "confirm", f"all {n} evidence lines agree ({_names(L)})"
+            if s.get("realign") is None and misaligned(m):
+                why = ("ECC could not lock on" if m.get("coreg_shift_px") is None
+                       else f"{m['residual_flow_px']:.2f} px of shift left over unflagged ground")
+                return "realign", f"before and after do not line up ({why}): re-align on SIFT keypoints and measure again"
+            if s.get("zoom") is None and not cloudy and n >= ZOOM_MIN_LINES:
+                return "zoom", (f"{n} of 4 evidence lines agree ({_names(L, False)} missing): "
+                                "measure the four 300 m quadrants separately")
+            if s.get("zoom"):
+                strong, share = strong_parts(s["zoom"])
+                if share >= ZOOM_CONFIRM_SHARE:
+                    return "confirm", (f"all 4 evidence lines agree in the {', '.join(strong)} quadrant"
+                                       f"{'s' if len(strong) > 1 else ''}, {share:.0%} of the flagged ground")
             # only spend a download where a second look can change the outcome
-            if can_fetch and (n >= LATER_LINES or cloudy):
-                why = "clouds hid most of it" if cloudy else f"{n} of 4 evidence lines agree ({', '.join(k for k, x in L.items() if not x)} missing)"
+            if s["can_fetch"] and (n >= LATER_LINES or cloudy):
+                why = "clouds hid most of it" if cloudy else f"{n} of 4 evidence lines agree ({_names(L, False)} missing)"
                 return "look_later", f"{why}: fetch a later cloud-free image to see whether the change persists"
-            agree = f"{n} of 4 evidence lines agree ({', '.join(k for k, x in L.items() if x) or 'none'})"
+            agree = f"{n} of 4 evidence lines agree ({_names(L)})"
             if n >= LATER_LINES or cloudy:
                 return "ask_human", f"{agree}; a later look could settle it but the download budget is used up"
             return "ask_human", f"only {agree}: too weak for a later image to confirm"
         p = persistence(later)
-        if p == "persists" and (n >= LATER_LINES or (cloudy and n >= 2)):
+        if p == "persists" and can_confirm(s):
             return "confirm", f"{n} of 4 evidence lines agree and the colour change persists weeks later"
         if p == "reverted":
             return "flag", "the ground looks like it did before the flood again: probably seasonal, not flood damage"
@@ -91,57 +146,114 @@ class RulePlanner:
 
 
 class LLMPlanner:
-    """A language model picks the next action from the measurements. Guard rails are enforced here,
+    """A language model picks the next tool from the measurements. Guard rails are enforced here,
     not trusted to the model."""
     name = "llm"
     TOOLS = [{"name": a, "description": d, "parameters": {"type": "object", "properties": {
         "reason": {"type": "string", "description": "one sentence, citing the measurements"}}, "required": ["reason"]}}
-        for a, d in (("confirm", "The flagged ground is flood/debris damage."),
+        for a, d in (("realign", "Before and after images may not line up: re-align on SIFT keypoints and measure again."),
+                     ("zoom", "Measure the cell's four 300 m quadrants separately (mixed ground)."),
                      ("look_later", "Fetch a fresh cloud-free image of this cell from weeks later and measure again."),
+                     ("confirm", "The flagged ground is flood/debris damage."),
                      ("ask_human", "Send to an analyst: evidence is mixed or insufficient."),
                      ("flag", "Likely false alarm (e.g. the change reverted). An analyst still decides."))]
     SYSTEM = ("You inspect one 600 m cell of a satellite flood-impact map. You get OpenCV measurements of the flagged "
               "ground compared with nearby unflagged valley ground ('contrast' = flagged minus reference), the four "
-              "evidence lines (colour, vegetation, structure, radar), and, if fetched, the same measurements from a "
-              "later image. Debris and scour persist for months; wet soil, turbid water and seasonal green-up do not. "
-              "Call exactly one tool.")
+              "evidence lines (colour, vegetation, structure, radar), how well before and after line up "
+              "(coreg_shift_px, residual_flow_px), and the results of tools you already used: realign, zoom "
+              "(per-quadrant evidence lines) and look_later (the same measurements on a later image). Debris and "
+              "scour persist for months; wet soil, turbid water and seasonal green-up do not. Each tool can be used "
+              "once per cell. Call exactly one tool.")
 
     def __init__(self):
         from .copilot import _backend, _call_bedrock, _call_openai
         b = _backend()
         if b is None:
             raise RuntimeError("no LLM backend configured (see copilot.py)")
-        self.call = _call_openai if b == "openai" else _call_bedrock
+        self.call = _call_bedrock if b == "bedrock" else _call_openai
         self.name = f"llm ({b})"
         self.fallback = RulePlanner()
 
-    def decide(self, cell, m, later, can_fetch):
+    def decide(self, cell, s):
+        m, later = s["m"], s.get("later")
         L = lines(m)
-        payload = {"cell": {k: cell[k] for k in ("impact_ha", "buildings_hit", "road_segments_cut", "people_nearby_est")},
-                   "measurements": m, "evidence_lines": L, "later_look": later,
-                   "later_persistence": persistence(later) if later else None, "can_fetch_more_imagery": can_fetch}
+        payload = {"cell": {k: cell.get(k) for k in ("impact_ha", "buildings_hit", "road_segments_cut", "people_nearby_est")},
+                   "measurements": m, "evidence_lines": L, "misaligned": misaligned(m), "realign": s.get("realign"),
+                   "zoom": _lines_brief(s["zoom"]) if s.get("zoom") else None,
+                   "later_look": later, "later_persistence": persistence(later) if later else None,
+                   "can_fetch_more_imagery": s["can_fetch"]}
         msgs = [{"role": "system", "content": self.SYSTEM},
                 {"role": "user", "content": json.dumps(payload, default=str)}]
         try:
             _, calls, _ = self.call(msgs, self.TOOLS)
             action, reason = calls[0][1], calls[0][2].get("reason", "")
         except Exception as e:
-            a, r = self.fallback.decide(cell, m, later, can_fetch)
+            a, r = self.fallback.decide(cell, s)
             return a, f"{r} (rules; model unavailable: {str(e)[:60]})"
         n = sum(L.values())
-        cloudy = (m.get("clear_share") or 0) < CLOUDY
-        if action == "confirm" and not (n >= CONFIRM_LINES or (later and persistence(later) == "persists"
-                                                                 and (n >= LATER_LINES or (cloudy and n >= 2)))):
+        if action == "confirm" and not can_confirm(s):
             return "ask_human", f"model wanted to confirm ({reason}) but only {n} of 4 lines agree: needs an analyst"
-        if action == "look_later" and (not can_fetch or later is not None):
+        if action == "look_later" and (not s["can_fetch"] or later is not None):
             return "ask_human", f"model asked for more imagery ({reason}); none available: needs an analyst"
-        if action not in {"confirm", "look_later", "ask_human", "flag"}:
+        if (action == "realign" and s.get("realign")) or (action == "zoom" and s.get("zoom") is not None):
+            return "ask_human", f"model asked for {action} again ({reason}): needs an analyst"
+        if action not in {"realign", "zoom", "look_later", "confirm", "ask_human", "flag"}:
             return "ask_human", "model gave no valid action"
         return action, reason
 
 
 def _now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def _lines_brief(parts):
+    return [{"part": p["part"], "impact_ha": p["impact_ha"], "lines": lines(p["measurements"])} for p in parts]
+
+
+def settle(ev, cell: dict, P, chips: Path | None = None, later_look=None, tools=("realign", "zoom")) -> dict:
+    """Run the perceive -> decide -> act loop on one cell until it is settled.
+    later_look: callable(cell) -> (band overrides, scenes) or None when no more downloads are allowed.
+    tools: which OpenCV tools the agent may use (the others count as already tried)."""
+    chip = chips / f"{cell['id']}.png" if chips else None
+    m = vision.measure(ev, cell, chip)
+    trace = [{"step": "perceive", "tool": "vision.measure", "lines": lines(m),
+              "coreg_shift_px": m.get("coreg_shift_px"), "residual_flow_px": m.get("residual_flow_px")}]
+    s = {"m": m, "realign": None if "realign" in tools else "off", "zoom": None if "zoom" in tools else [],
+         "later": None}
+    for step in range(MAX_STEPS + 1):
+        s["can_fetch"] = later_look is not None and s["later"] is None
+        action, why = P.decide(cell, s)
+        if action not in ("confirm", "ask_human", "flag") and step == MAX_STEPS:
+            action, why = "ask_human", f"{why} (step budget used up: needs an analyst)"
+        trace.append({"step": "decide", "action": action, "reason": why})
+        if action in ("confirm", "ask_human", "flag"):
+            break
+        if action == "realign":
+            aligned = chips / f"{cell['id']}_aligned.png" if chips else None
+            mf = vision.measure(ev, cell, aligned, features=True)
+            ok = mf.get("coreg_shift_px") is not None
+            s["realign"] = "ok" if ok else "failed"
+            if ok:
+                s["m"], chip = mf, aligned
+            trace.append({"step": "act", "tool": "vision.realign", "ok": ok, "inliers": mf.get("coreg_inliers"),
+                          "shift_px": mf.get("coreg_shift_px"), "residual_flow_px": mf.get("residual_flow_px"),
+                          "lines": lines(s["m"])})
+        elif action == "zoom":
+            s["zoom"] = vision.zoom(ev, cell, features=s["realign"] == "ok")
+            strong, share = strong_parts(s["zoom"])
+            trace.append({"step": "act", "tool": "vision.zoom", "parts": _lines_brief(s["zoom"]),
+                          "strong_parts": strong, "strong_share": round(share, 3)})
+        elif action == "look_later":
+            ov, scenes = later_look(cell)
+            later = vision.measure(ev, cell, chips / f"{cell['id']}_later.png" if chips else None, rgb_override=ov,
+                                   features=s["realign"] == "ok") if ov else {}
+            later["scenes"] = scenes
+            s["later"] = later
+            trace.append({"step": "act", "tool": "vision.later_look", "scenes": scenes,
+                          "persistence": persistence(later)})
+    verdict = {"confirm": "confirmed", "ask_human": "needs_review", "flag": "likely_false_alarm"}[action]
+    return {"verdict": verdict, "reason": why, "state": s, "trace": trace,
+            "chip": chip.name if chip else None}
 
 
 def inspect(run_id: str, max_cells: int = 40, planner: str = "rules", max_fetches: int = MAX_FETCHES,
@@ -157,36 +269,48 @@ def inspect(run_id: str, max_cells: int = 40, planner: str = "rules", max_fetche
         from .providers import providers
         provider = providers()[0]
     fetches, out, t0 = 0, [], time.time()
+
+    def later_look(cell):
+        nonlocal fetches
+        fetches += 1
+        ov, used = vision.later_look(ev, cell, facts["event_time_utc"], provider)
+        return ov, [u["date"] for u in used]
+
     for i, cell in enumerate(todo[:max_cells]):
         progress(f"inspecting cell {i + 1}/{min(len(todo), max_cells)}", int(100 * i / max(min(len(todo), max_cells), 1)))
-        trace = []
-        m = vision.measure(ev, cell, chips / f"{cell['id']}.png")
-        trace.append({"step": "perceive", "tool": "vision.measure", "lines": lines(m)})
-        later = None
-        action, why = P.decide(cell, m, None, fetches < max_fetches)
-        trace.append({"step": "decide", "action": action, "reason": why})
-        if action == "look_later":
-            fetches += 1
-            ov, used = vision.later_look(ev, cell, facts["event_time_utc"], provider)
-            later = vision.measure(ev, cell, chips / f"{cell['id']}_later.png", rgb_override=ov) if ov else {}
-            later["scenes"] = [u["date"] for u in used]
-            trace.append({"step": "act", "tool": "vision.later_look", "scenes": later["scenes"],
-                          "persistence": persistence(later)})
-            action, why = P.decide(cell, m, later, False)
-            trace.append({"step": "decide", "action": action, "reason": why})
-        verdict = {"confirm": "confirmed", "ask_human": "needs_review", "flag": "likely_false_alarm"}[action]
-        out.append({**cell, "verdict": verdict, "reason": why, "measurements": m, "later": later, "trace": trace,
-                    "chip": f"inspect/{cell['id']}.png",
-                    "chip_later": f"inspect/{cell['id']}_later.png" if later else None, "review": None})
+        tc = time.time()
+        r = settle(ev, cell, P, chips, later_look if fetches < max_fetches else None)
+        s, verdict, why = r["state"], r["verdict"], r["reason"]
+        tools_used = [t["tool"] for t in r["trace"] if t["step"] == "act"]
+        out.append({**cell, "verdict": verdict, "reason": why, "measurements": s["m"], "realign": s["realign"],
+                    "zoom": _lines_brief(s["zoom"]) if s["zoom"] else None, "later": s["later"], "trace": r["trace"],
+                    "chip": f"inspect/{r['chip']}",
+                    "chip_later": f"inspect/{cell['id']}_later.png" if s["later"] else None,
+                    "review": None})
+        telemetry.emit("inspect_cell", {"Planner": P.name.split(" ")[0], "Verdict": verdict},
+                       {"Cells": (1, "Count"), "ToolCalls": (len(tools_used), "Count"),
+                        "CellSeconds": (round(time.time() - tc, 2), "Seconds")},
+                       run_id=run_id, cell=cell["id"], tools=tools_used, reason=why)
     old = load(run_id)
     if old:   # keep analyst decisions already made on the same cells
         prev = {c["id"]: c.get("review") for c in old["cells"]}
         for c in out:
             c["review"] = prev.get(c["id"])
+    tool_calls = {}
+    for c in out:
+        for t in c["trace"]:
+            if t["step"] == "act":
+                tool_calls[t["tool"]] = tool_calls.get(t["tool"], 0) + 1
     res = {"run_id": run_id, "planner": P.name, "inspected_utc": _now(), "runtime_s": round(time.time() - t0, 1),
-           "cells_total": len(todo), "cells_inspected": len(out), "later_looks": fetches, "cells": out}
+           "cells_total": len(todo), "cells_inspected": len(out), "later_looks": fetches, "tool_calls": tool_calls,
+           "cells": out}
     res["summary"] = summary(res)
     save(run_id, res)
+    s = res["summary"]
+    telemetry.emit("inspect_run", {"Planner": P.name.split(" ")[0]},
+                   {"RunSeconds": (res["runtime_s"], "Seconds"), "CellsConfirmed": (s["confirmed"], "Count"),
+                    "CellsToAnalyst": (s["needs_review"] + s["likely_false_alarm"], "Count"),
+                    "LaterLooks": (fetches, "Count")}, run_id=run_id, tool_calls=tool_calls)
     progress("done", 100)
     return res
 

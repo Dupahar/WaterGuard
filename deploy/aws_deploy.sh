@@ -7,7 +7,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 W() { if command -v cygpath >/dev/null; then echo "file://$(cygpath -w "$1")"; else echo "file://$1"; fi; }
 TMP=$(mktemp -d)
 
-echo "== IAM role WaterGuardEC2 (S3 read of the deploy bucket, SSM parameter /waterguard/*, Bedrock invoke, SSM agent)"
+echo "== IAM role WaterGuardEC2 (S3 read of the deploy bucket, SSM parameter /waterguard/*, Bedrock invoke, CloudWatch Logs /waterguard/*, SSM agent)"
 cat > $TMP/trust.json <<'J'
 {"Version":"2012-10-17","Statement":[{"Effect":"Allow","Principal":{"Service":"ec2.amazonaws.com"},"Action":"sts:AssumeRole"}]}
 J
@@ -16,7 +16,9 @@ cat > $TMP/policy.json <<'J'
  {"Effect":"Allow","Action":"s3:GetObject","Resource":"arn:aws:s3:::waterguard-deploy-641079926578/*"},
  {"Effect":"Allow","Action":"ssm:GetParameter","Resource":"arn:aws:ssm:ap-south-1:641079926578:parameter/waterguard/*"},
  {"Effect":"Allow","Action":["bedrock:InvokeModel","bedrock:InvokeModelWithResponseStream","bedrock:Converse","bedrock:ConverseStream"],
-  "Resource":["arn:aws:bedrock:*::foundation-model/*","arn:aws:bedrock:*:641079926578:inference-profile/*"]}
+  "Resource":["arn:aws:bedrock:*::foundation-model/*","arn:aws:bedrock:*:641079926578:inference-profile/*"]},
+ {"Effect":"Allow","Action":["logs:CreateLogGroup","logs:CreateLogStream","logs:PutLogEvents","logs:DescribeLogStreams"],
+  "Resource":["arn:aws:logs:ap-south-1:641079926578:log-group:/waterguard/*","arn:aws:logs:ap-south-1:641079926578:log-group:/waterguard/*:*"]}
 ]}
 J
 aws iam get-role --role-name WaterGuardEC2 >/dev/null 2>&1 || {

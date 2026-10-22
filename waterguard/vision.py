@@ -164,6 +164,66 @@ def coregister(pre_l, post_l, valid):
     return dx, dy, float(cc)
 
 
+MIN_INLIERS = 12
+MAX_REALIGN_PX = 6.0
+
+
+def realign(pre_l, post_l, valid, up=2):
+    """Feature-based alignment for when ECC does not lock on (shift beyond its reach, low contrast, or
+    so much changed ground that the gradients disagree). SIFT keypoints on contrast-equalised lightness,
+    Lowe's ratio test, then an affine model fitted with USAC MAGSAC++, so keypoints on
+    the changed ground (which have no true match) fall out as outliers. Returns a dict with the 2x3
+    warp (before -> after pixel coordinates, as ECC) or None if no trustworthy model was found."""
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(4, 4))
+
+    def prep(a):
+        a8 = np.clip(np.nan_to_num(a) * 2.55, 0, 255).astype("uint8")
+        return clahe.apply(cv2.resize(a8, None, fx=up, fy=up, interpolation=cv2.INTER_CUBIC))
+    mask = cv2.resize(valid.astype("uint8") * 255, None, fx=up, fy=up, interpolation=cv2.INTER_NEAREST)
+    sift = cv2.SIFT_create(nfeatures=3000, contrastThreshold=0.01)
+    k1, d1 = sift.detectAndCompute(prep(pre_l), mask)
+    k2, d2 = sift.detectAndCompute(prep(post_l), mask)
+    if d1 is None or d2 is None or min(len(k1), len(k2)) < MIN_INLIERS:
+        return None
+    good = [p[0] for p in cv2.BFMatcher(cv2.NORM_L2).knnMatch(d1, d2, k=2)
+            if len(p) == 2 and p[0].distance < 0.8 * p[1].distance]
+    if len(good) < MIN_INLIERS:
+        return None
+    src = np.float32([k1[g.queryIdx].pt for g in good]) / up
+    dst = np.float32([k2[g.trainIdx].pt for g in good]) / up
+    A, inl = cv2.estimateAffine2D(src, dst, method=cv2.USAC_MAGSAC, ransacReprojThreshold=0.75,
+                                  maxIters=5000, confidence=0.999)
+    if A is None or inl is None or int(inl.sum()) < MIN_INLIERS:
+        return None
+    inl = inl.ravel().astype(bool)
+    scale = float(np.sqrt(abs(np.linalg.det(A[:, :2]))))
+    rot = float(np.degrees(np.arctan2(A[1, 0] - A[0, 1], A[0, 0] + A[1, 1])))
+    shear = float(abs(A[0, 1] + A[1, 0]) + abs(A[0, 0] - A[1, 1]))
+    res = np.linalg.norm(src[inl] @ A[:, :2].T + A[:, 2] - dst[inl], axis=1)
+    dx, dy = float(A[0, 2]), float(A[1, 2])
+    # Sentinel-2 to Sentinel-2 is a shift; anything else means the matches locked onto the wrong thing
+    if abs(scale - 1) > 0.02 or abs(rot) > 1.0 or shear > 0.03 or np.hypot(dx, dy) > MAX_REALIGN_PX:
+        return None
+    return {"dx": dx, "dy": dy, "scale": round(scale, 4), "rot_deg": round(rot, 3), "inliers": int(inl.sum()),
+            "matches": len(good), "residual_px": round(float(np.median(res)), 3), "warp": A.astype("float32")}
+
+
+def correspondence(pre_l, post_l):
+    """Dense optical flow (DIS) both ways between the aligned before and after lightness. Where ground
+    only shifted (a misregistered edge, a moved shadow, a river bank displaced by a pixel) the forward and
+    backward flows cancel; where new material replaced the old surface there is nothing to match and
+    they do not. Returns (forward-backward error in px, forward flow), both per pixel."""
+    to8 = lambda a: np.clip(np.nan_to_num(a) * 2.55, 0, 255).astype("uint8")
+    a, b = to8(pre_l), to8(post_l)
+    dis = cv2.DISOpticalFlow_create(cv2.DISOPTICAL_FLOW_PRESET_MEDIUM)
+    fwd = dis.calc(a, b, None)
+    bwd = dis.calc(b, a, None)
+    h, w = a.shape
+    gx, gy = np.meshgrid(np.arange(w, dtype="float32"), np.arange(h, dtype="float32"))
+    back = cv2.remap(bwd, gx + fwd[..., 0], gy + fwd[..., 1], cv2.INTER_LINEAR, borderMode=cv2.BORDER_REPLICATE)
+    return np.linalg.norm(fwd + back, axis=2), fwd
+
+
 def _ssim_dissimilarity(a, b):
     """Local structural dissimilarity (1 - SSIM) / 2 on two single-channel float images, Gaussian windows."""
     C1, C2 = (0.01 * 100) ** 2, (0.03 * 100) ** 2      # L* range 0..100
@@ -184,8 +244,11 @@ def _med(x, m):
     return round(float(np.median(v)), 4) if v.size >= 20 else None
 
 
-def measure(ev: Evidence, cell: dict, chip_path: Path | None = None, rgb_override: dict | None = None) -> dict:
-    """All metrics for one cell. rgb_override: {'red_post': arr, ...} chip-sized replacements (later imagery)."""
+def measure(ev: Evidence, cell: dict, chip_path: Path | None = None, rgb_override: dict | None = None,
+            features: bool = False, focus: np.ndarray | None = None) -> dict:
+    """All metrics for one cell. rgb_override: {'red_post': arr, ...} chip-sized replacements (later imagery).
+    features: align with realign() (SIFT + MAGSAC) instead of ECC. focus: window-sized mask that
+    restricts the flagged ground to one patch (see patches())."""
     (r0, r1), (c0, c1) = cell["rows"], cell["cols"]
     R0, R1, C0, C1 = window(ev, cell)
     win = (slice(R0, R1), slice(C0, C1))
@@ -196,6 +259,8 @@ def measure(ev: Evidence, cell: dict, chip_path: Path | None = None, rgb_overrid
     core = np.zeros_like(imp)
     core[r0 - R0:r1 - R0, c0 - C0:c1 - C0] = True
     M = imp & core
+    if focus is not None:
+        M = M & focus
     hand = np.nan_to_num(B["hand_m"], nan=999)
     # reference = unflagged valley ground, but not the wetted channel itself (water level and turbidity
     # change from week to week whether or not a flood came through)
@@ -218,21 +283,36 @@ def measure(ev: Evidence, cell: dict, chip_path: Path | None = None, rgb_overrid
 
     lab_pre = cv2.cvtColor(_display(pre), cv2.COLOR_RGB2Lab)
     lab_post = cv2.cvtColor(_display(post), cv2.COLOR_RGB2Lab)
-    shift = coregister(lab_pre[..., 0], lab_post[..., 0], clear) if clear.mean() > 0.3 else None
-    if shift:
-        dx, dy, cc = shift
-        m["coreg_shift_px"], m["coreg_correlation"] = round(float(np.hypot(dx, dy)), 3), round(cc, 3)
-        A = np.float32([[1, 0, dx], [0, 1, dy]])
+    A = None
+    m["coreg_method"] = "features" if features else "ecc"
+    m["coreg_shift_px"] = m["coreg_correlation"] = m["coreg_inliers"] = None
+    if clear.mean() > 0.3:
+        if features:
+            r = realign(lab_pre[..., 0], lab_post[..., 0], clear)
+            if r:
+                A = r["warp"]
+                m["coreg_shift_px"], m["coreg_inliers"] = round(float(np.hypot(r["dx"], r["dy"])), 3), r["inliers"]
+                m["coreg_residual_px"] = r["residual_px"]
+        else:
+            shift = coregister(lab_pre[..., 0], lab_post[..., 0], clear)
+            if shift:
+                dx, dy, cc = shift
+                m["coreg_shift_px"], m["coreg_correlation"] = round(float(np.hypot(dx, dy)), 3), round(cc, 3)
+                A = np.float32([[1, 0, dx], [0, 1, dy]])
+    if A is not None:
         lab_post = cv2.warpAffine(lab_post, A, lab_post.shape[1::-1], flags=cv2.INTER_LINEAR | cv2.WARP_INVERSE_MAP,
                                   borderMode=cv2.BORDER_REFLECT)
-    else:
-        m["coreg_shift_px"], m["coreg_correlation"] = None, None
 
     dE = np.linalg.norm(lab_post - lab_pre, axis=2)
     dis = _ssim_dissimilarity(lab_pre[..., 0], lab_post[..., 0])
     tex = np.log2((_local_std(cv2.Laplacian(lab_post[..., 0], cv2.CV_32F)) + 1) /
                   (_local_std(cv2.Laplacian(lab_pre[..., 0], cv2.CV_32F)) + 1))
-    for k, v in (("delta_e", dE), ("ssim_dissimilarity", dis), ("texture_log2_ratio", tex)):
+    fb, flow = correspondence(lab_pre[..., 0], lab_post[..., 0])
+    # what is left of the misalignment, read off the dense flow over unflagged ground
+    ref = Rf & clear
+    m["residual_flow_px"] = (round(float(np.hypot(*np.median(flow[ref], axis=0))), 3)
+                             if ref.sum() >= 20 else None)
+    for k, v in (("delta_e", dE), ("ssim_dissimilarity", dis), ("texture_log2_ratio", tex), ("unmatched_px", fb)):
         v = np.where(clear, v, np.nan)
         m[f"{k}_flagged"], m[f"{k}_reference"] = _med(v, M), _med(v, Rf)
 
@@ -250,7 +330,7 @@ def measure(ev: Evidence, cell: dict, chip_path: Path | None = None, rgb_overrid
         m["elongation"] = round(max(w_, h_) / max(min(w_, h_), 1), 2)
         m["solidity"] = round(cv2.contourArea(big) / max(hull, 1), 3)
         m["patches_in_cell"] = len(cnts)
-    for k in ("delta_e", "ssim_dissimilarity", "texture_log2_ratio", "sar_z", "ndvi_drop"):
+    for k in ("delta_e", "ssim_dissimilarity", "texture_log2_ratio", "unmatched_px", "sar_z", "ndvi_drop"):
         f, r = m.get(f"{k}_flagged"), m.get(f"{k}_reference")
         m[f"{k}_contrast"] = round(f - r, 4) if f is not None and r is not None else None
 
@@ -258,6 +338,29 @@ def measure(ev: Evidence, cell: dict, chip_path: Path | None = None, rgb_overrid
         chip(chip_path, _display(pre), cv2.cvtColor(lab_post, cv2.COLOR_Lab2RGB), dE, M, Rf, core, m,
              np.isfinite(pre).all(2), np.isfinite(post).all(2))
     return m
+
+
+MIN_PART_PX = 30        # 0.3 ha of impact in a quadrant to measure it on its own
+
+
+def zoom(ev: Evidence, cell: dict, features: bool = False) -> list[dict]:
+    """Look at a cell's four 300 m quadrants separately. A 600 m cell often mixes a scoured debris
+    lobe with ground that barely changed, and one median over both hides the lobe. Returns the
+    quadrants that hold enough flagged ground, each with its own measurements."""
+    (r0, r1), (c0, c1) = cell["rows"], cell["cols"]
+    R0, R1, C0, C1 = window(ev, cell)
+    rm, cm = (r0 + r1) // 2, (c0 + c1) // 2
+    out = []
+    for name, (a, b, c, d) in (("NW", (r0, rm, c0, cm)), ("NE", (r0, rm, cm, c1)),
+                               ("SW", (rm, r1, c0, cm)), ("SE", (rm, r1, cm, c1))):
+        focus = np.zeros((R1 - R0, C1 - C0), bool)
+        focus[a - R0:b - R0, c - C0:d - C0] = True
+        n = int((ev.impact[R0:R1, C0:C1] & focus).sum())
+        if n < MIN_PART_PX:
+            continue
+        out.append({"part": name, "impact_ha": round(n * 0.01, 2),
+                    "measurements": measure(ev, cell, features=features, focus=focus)})
+    return out
 
 
 def chip(path, pre_rgb, post_rgb, dE, M, Rf, core, m, ok_pre, ok_post, scale=4):

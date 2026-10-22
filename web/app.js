@@ -225,10 +225,19 @@ function showCells() {
   const on = document.querySelector('.tabs button[data-tab="inspect"]')?.getAttribute("aria-selected") === "true";
   for (const id of ["cells", "cells-hit"]) if (map.getLayer(id)) map.setLayoutProperty(id, "visibility", on ? "visible" : "none");
 }
+const lineMarks = (L) => Object.entries(L).map(([k, v]) => (v ? "✓" : "·") + k).join(" ");
+function actText(t) {
+  if (t.tool === "vision.realign") return t.ok
+    ? `realigned ${t.shift_px} px on ${t.inliers} SIFT matches → ${lineMarks(t.lines)}`
+    : "no trustworthy SIFT alignment: kept ECC";
+  if (t.tool === "vision.zoom") return t.parts.map((p) => `${p.part} ${p.impact_ha} ha ${Object.values(p.lines).filter(Boolean).length}/4`).join(", ")
+    + (t.strong_parts.length ? ` → strong: ${t.strong_parts.join(", ")} (${Math.round(100 * t.strong_share)}%)` : "");
+  return `${t.scenes.length} later scenes, change ${t.persistence}`;
+}
 function traceText(c) {
   return c.trace.map((t) => t.step === "perceive"
-    ? "perceive  " + Object.entries(t.lines).map(([k, v]) => (v ? "✓" : "·") + k).join(" ")
-    : t.step === "act" ? `act       ${t.tool} → ${t.scenes.length} later scenes, change ${t.persistence}`
+    ? "perceive  " + lineMarks(t.lines)
+    : t.step === "act" ? `act       ${t.tool.replace("vision.", "")}: ${actText(t)}`
     : `decide    ${t.action}`).join("\n");
 }
 async function loadInspection(id) {

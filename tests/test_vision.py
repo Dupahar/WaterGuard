@@ -67,7 +67,7 @@ def test_measure_sees_debris_against_reference(scene, tmp_path):
     img = cv2.imread(str(tmp_path / "chip.png"))
     assert img is not None and img.shape[1] == 3 * img.shape[0]         # before | after | change
     assert all(inspector.lines(m).values())
-    assert inspector.RulePlanner().decide(cell, m, None, True)[0] == "confirm"
+    assert inspector.RulePlanner().decide(cell, {"m": m, "can_fetch": True})[0] == "confirm"
 
 
 def test_no_change_is_not_confirmed(scene):
@@ -77,7 +77,7 @@ def test_no_change_is_not_confirmed(scene):
     ev.bands["ndvi_post"] = ev.bands["ndvi_pre"].copy()
     ev.bands["sar_z"][:] = 0.6
     m = vision.measure(ev, cell)
-    action, _ = inspector.RulePlanner().decide(cell, m, None, True)
+    action, _ = inspector.RulePlanner().decide(cell, {"m": m, "realign": "ok", "can_fetch": True})
     assert action == "ask_human"          # nothing agrees: too weak to be worth a download, goes to a person
 
 
@@ -86,8 +86,8 @@ def test_reverted_change_is_flagged_not_removed(scene):
     m = {"delta_e_contrast": 13, "ndvi_drop_contrast": 0.2, "ssim_dissimilarity_contrast": 0.2,
          "sar_z_contrast": 0.1, "clear_share": 0.9}
     later = {"delta_e_contrast": 1.0, "ndvi_drop_contrast": 0.0, "clear_share": 0.9}
-    assert inspector.RulePlanner().decide(cell, m, None, True)[0] == "look_later"
-    assert inspector.RulePlanner().decide(cell, m, later, False)[0] == "flag"
+    assert inspector.RulePlanner().decide(cell, {"m": m, "realign": "ok", "zoom": [], "can_fetch": True})[0] == "look_later"
+    assert inspector.RulePlanner().decide(cell, {"m": m, "later": later, "can_fetch": False})[0] == "flag"
 
 
 def test_llm_cannot_confirm_without_evidence(monkeypatch, scene):
@@ -98,7 +98,62 @@ def test_llm_cannot_confirm_without_evidence(monkeypatch, scene):
     P.call = lambda msgs, tools: ("", [("1", "confirm", {"reason": "looks bad"})], None)
     weak = {"delta_e_contrast": 1, "ndvi_drop_contrast": 0, "ssim_dissimilarity_contrast": 0, "sar_z_contrast": 0,
             "clear_share": 1.0}
-    assert P.decide(cell, weak, None, True)[0] == "ask_human"
+    assert P.decide(cell, {"m": weak, "can_fetch": True})[0] == "ask_human"
+
+
+def test_realign_recovers_shift_beyond_ecc_with_changed_ground():
+    base = _texture(180, 180, 1) * 100
+    moved = cv2.warpAffine(base, np.float32([[1, 0, 3.2], [0, 1, 1.7]]), (180, 180), flags=cv2.INTER_CUBIC,
+                           borderMode=cv2.BORDER_REFLECT)
+    moved[60:120] = _texture(60, 180, 9) * 100              # a third of the ground replaced
+    ok = np.ones(base.shape, bool)
+    assert vision.coregister(base, moved, ok) is None
+    r = vision.realign(base, moved, ok)
+    assert r is not None and abs(r["dx"] - 3.2) < 0.1 and abs(r["dy"] - 1.7) < 0.1
+    assert vision.realign(_texture(180, 180, 1) * 100, _texture(180, 180, 2) * 100, ok) is None
+
+
+def test_correspondence_tells_shifted_from_replaced_ground():
+    base = _texture(180, 180, 1) * 100
+    shifted = cv2.warpAffine(base, np.float32([[1, 0, 1.5], [0, 1, 0]]), (180, 180), flags=cv2.INTER_CUBIC,
+                             borderMode=cv2.BORDER_REFLECT)
+    replaced = base.copy()
+    replaced[60:120] = _texture(60, 180, 9) * 100
+    fb_shift, flow = vision.correspondence(base, shifted)
+    fb_new, _ = vision.correspondence(base, replaced)
+    assert np.median(fb_shift) < 0.3 and abs(np.median(flow[..., 0]) - 1.5) < 0.2
+    assert np.median(fb_new[70:110]) > 4 * np.median(fb_new[:50]) + 1
+
+
+def test_agent_realigns_misregistered_debris_then_confirms(scene):
+    ev, cell = scene
+    for k in ("red", "green", "blue", "ndvi"):
+        ev.bands[f"{k}_post"] = cv2.warpAffine(ev.bands[f"{k}_post"], np.float32([[1, 0, 4], [0, 1, -3]]),
+                                               (150, 150), borderMode=cv2.BORDER_REFLECT)
+    P, m = inspector.RulePlanner(), vision.measure(ev, cell)
+    assert m["coreg_shift_px"] is None
+    s = {"m": m, "realign": None, "zoom": None, "later": None, "can_fetch": True}
+    assert P.decide(cell, s)[0] == "realign"
+    s["m"], s["realign"] = vision.measure(ev, cell, features=True), "ok"
+    assert abs(s["m"]["coreg_shift_px"] - 5.0) < 0.3
+    assert P.decide(cell, s)[0] == "confirm"
+
+
+def test_zoom_confirms_only_when_strong_quadrants_dominate(scene):
+    ev, cell = scene
+    strong = {"delta_e_contrast": 20, "ndvi_drop_contrast": 0.3, "ssim_dissimilarity_contrast": 0.3, "sar_z_contrast": 1.5}
+    weak = {"delta_e_contrast": 2, "ndvi_drop_contrast": 0.3, "ssim_dissimilarity_contrast": 0.3, "sar_z_contrast": 0}
+    mixed = {**weak, "clear_share": 1.0, "coreg_shift_px": 0.2, "residual_flow_px": 0.1}
+    s = {"m": mixed, "realign": None, "zoom": None, "later": None, "can_fetch": False}
+    assert inspector.RulePlanner().decide(cell, s)[0] == "zoom"
+    s["zoom"] = [{"part": "NW", "impact_ha": 3, "measurements": strong}, {"part": "SE", "impact_ha": 1, "measurements": weak}]
+    assert inspector.RulePlanner().decide(cell, s)[0] == "confirm"
+    s["zoom"] = [{"part": "NW", "impact_ha": 1, "measurements": strong}, {"part": "SE", "impact_ha": 3, "measurements": weak}]
+    assert inspector.RulePlanner().decide(cell, s)[0] == "ask_human"
+    P = inspector.LLMPlanner.__new__(inspector.LLMPlanner)
+    P.fallback = inspector.RulePlanner()
+    P.call = lambda msgs, tools: ("", [("1", "confirm", {"reason": "one quadrant is clearly debris"})], None)
+    assert P.decide(cell, s)[0] == "ask_human"
 
 
 def test_settlement_sampling_ignores_osm_feature_order():

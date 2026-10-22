@@ -1,0 +1,92 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WaterGuard architecture</title>
+<!-- Rendered to docs/figures/architecture.png: see docs/diagrams/render.sh -->
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1800px; height: 1050px; background: #0b1220; color: #e6edf6;
+         font-family: "Segoe UI", Inter, Arial, sans-serif; position: relative; }
+  h1 { margin: 0; position: absolute; left: 48px; top: 30px; font-size: 34px; font-weight: 650; }
+  h1 span { color: #8aa0bd; font-weight: 400; font-size: 22px; margin-left: 14px; }
+  .zone { position: absolute; border: 2px dashed #3a4a63; border-radius: 18px; }
+  .zone > .tag { position: absolute; top: -15px; left: 22px; background: #0b1220; padding: 0 10px;
+                 font-size: 17px; letter-spacing: .06em; text-transform: uppercase; color: #8aa0bd; }
+  .aws { border-color: #ff9900aa; }
+  .aws > .tag { color: #ffb84d; }
+  .box { position: absolute; border-radius: 12px; padding: 12px 16px; background: #15213a;
+         border: 1.5px solid #2c3d5c; font-size: 17px; line-height: 1.35; }
+  .box b { display: block; font-size: 19px; margin-bottom: 4px; }
+  .box small { color: #9fb1c9; font-size: 15px; }
+  .cv { border-color: #5ac8fa; background: #10283a; }
+  .cv b { color: #7fd6ff; }
+  .agent { border-color: #b388ff; background: #1d1a3a; }
+  .agent b { color: #cbb2ff; }
+  .awsb { border-color: #ff9900; background: #2a1f0e; }
+  .awsb b { color: #ffb84d; }
+  .chain { border-color: #4cd08a; background: #10301f; }
+  .chain b { color: #6fe3a5; }
+  .human { border-color: #ffd166; background: #2d2810; }
+  .human b { color: #ffd98a; }
+  svg { position: absolute; left: 0; top: 0; }
+  .legend { position: absolute; left: 48px; bottom: 26px; font-size: 16px; color: #9fb1c9; }
+  .legend i { display: inline-block; width: 14px; height: 14px; border-radius: 3px; margin: 0 6px 0 22px; vertical-align: -1px; }
+</style>
+
+<h1>WaterGuard <span>flood damage from space: what runs where</span></h1>
+
+<!-- open data -->
+<div class="zone" style="left:40px;top:110px;width:330px;height:610px"><div class="tag">Open data (no keys)</div></div>
+<div class="box" style="left:66px;top:140px;width:280px"><b>Sentinel-1 RTC</b><small>radar, sees through monsoon cloud</small></div>
+<div class="box" style="left:66px;top:236px;width:280px"><b>Sentinel-2 L2A</b><small>optical, before / after / weeks later</small></div>
+<div class="box" style="left:66px;top:332px;width:280px"><b>Copernicus DEM</b><small>valley floor (HAND), flow paths</small></div>
+<div class="box" style="left:66px;top:428px;width:280px"><b>OpenStreetMap (ohsome)</b><small>buildings, roads, bridges as they were the day before</small></div>
+<div class="box" style="left:66px;top:548px;width:280px"><small>Microsoft Planetary Computer STAC: Sentinel + DEM; ohsome API: OSM history</small></div>
+
+<!-- AWS -->
+<div class="zone aws" style="left:420px;top:110px;width:1340px;height:780px"><div class="tag">AWS · ap-south-1</div></div>
+<div class="box awsb" style="left:450px;top:140px;width:250px"><b>CloudFront</b><small>HTTPS, caching; the only way in</small></div>
+<div class="box awsb" style="left:450px;top:250px;width:250px"><b>S3</b><small>app + data bundles</small></div>
+<div class="box awsb" style="left:450px;top:362px;width:250px"><b>SSM Parameter Store</b><small>secrets (encrypted), never in the image</small></div>
+<div class="box awsb" style="left:450px;top:478px;width:250px"><b>Amazon Bedrock</b><small>LLM planner + copilot (Nova Pro); or any OpenAI-compatible endpoint</small></div>
+<div class="box awsb" style="left:450px;top:612px;width:250px"><b>CloudWatch</b><small>container logs; agent metrics from Embedded Metric Format lines</small></div>
+<div class="box awsb" style="left:450px;top:740px;width:250px"><b>IAM role</b><small>least privilege: read bucket, read parameter, invoke model, write logs</small></div>
+
+<!-- EC2 -->
+<div class="zone aws" style="left:740px;top:140px;width:995px;height:725px;border-style:solid;border-color:#ff990066"><div class="tag">EC2 · Docker container</div></div>
+<div class="box" style="left:765px;top:170px;width:440px"><b>FastAPI + MapLibre dashboard</b><small>pick an area and a date, follow the run, review the queue, verify the proof</small></div>
+
+<div class="box cv" style="left:765px;top:290px;width:440px"><b>Detection pipeline · OpenCV 5</b><small>radar change (box filters), optical change, valley prior, morphology open/close, connected components, distance transform for riverbed growth</small></div>
+<div class="box" style="left:765px;top:452px;width:440px"><b>Damage + access</b><small>buildings / roads / bridges hit; road network (NetworkX): who is cut off</small></div>
+
+<div class="box agent" style="left:1240px;top:170px;width:470px;height:420px"><b>Inspector agent</b>
+<small>perceive → decide → act, per 600 m cell, until settled</small>
+<div style="margin-top:12px;font-size:16px;line-height:1.5">
+<span style="color:#7fd6ff">perceive (OpenCV 5)</span><br>
+ECC co-registration · CIELAB ΔE · SSIM · Laplacian texture · DIS optical flow (residual shift, forward-backward) · Canny edge artefacts · contours, hull<br>
+<span style="color:#cbb2ff">decide</span><br>
+rule planner, or an LLM planner under guard rails (Amazon Bedrock, or Nemotron on any OpenAI-compatible endpoint)<br>
+<span style="color:#7fd6ff">act (tools)</span><br>
+realign: SIFT + USAC MAGSAC++ · zoom: 300 m quadrants · look_later: fresh Sentinel-2 · confirm · ask_human · flag<br>
+<span style="color:#ffb84d">observe</span><br>every step kept as a trace; every decision a CloudWatch metric
+</div></div>
+
+<div class="box human" style="left:765px;top:590px;width:440px"><b>Analyst review queue</b><small>everything the agent did not confirm; only a person can remove a cell (pipeline re-runs with a veto)</small></div>
+<div class="box chain" style="left:1240px;top:650px;width:470px"><b>Verifiable report</b><small>SHA-256 Merkle roots over files and settlement claims, anchored on a public chain once the queue is empty</small></div>
+<div class="box" style="left:765px;top:745px;width:440px"><b>Situation report</b><small>printable, EN / नेपाली, QR code to re-check it in any browser</small></div>
+
+<svg width="1800" height="1050">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#8aa0bd"/></marker></defs>
+  <g stroke="#8aa0bd" stroke-width="2.2" fill="none" marker-end="url(#a)">
+    <path d="M346,346 L760,346"/>
+    <path d="M985,414 L985,448"/>
+    <path d="M1205,346 L1236,346"/>
+    <path d="M1240,215 L1209,215"/>
+    <path d="M1240,560 C1222,575 1222,610 1209,620"/>
+    <path d="M1205,660 C1222,668 1222,690 1236,692"/>
+    <path d="M985,692 L985,741"/>
+    <path d="M700,180 L761,195"/>
+  </g>
+</svg>
+
+<div class="legend"><i style="background:#5ac8fa"></i>OpenCV 5<i style="background:#b388ff"></i>agent<i style="background:#ff9900"></i>AWS service<i style="background:#ffd166"></i>human control<i style="background:#4cd08a"></i>public ledger</div>

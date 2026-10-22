@@ -1,6 +1,6 @@
 FROM python:3.13-slim
 
-ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 WATERGUARD_DATA=/data
+ENV PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1 WATERGUARD_DATA=/data WATERGUARD_TELEMETRY=1
 RUN apt-get update && apt-get install -y --no-install-recommends libexpat1 libgomp1 \
     && rm -rf /var/lib/apt/lists/*
 

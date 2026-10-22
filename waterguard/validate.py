@@ -130,12 +130,54 @@ def false_alarms() -> list:
     return out
 
 
+def _cell_truth(aoi: int, rid: str, cells: list) -> dict:
+    """cell id -> True if EMS mapped it as damage (>= 50 % of its flagged pixels inside EMS observed-event
+    polygons), False if not; cells mostly outside the area EMS analysed are left out (cannot be scored).
+    aoi 0 = a control valley with no damage."""
+    with rasterio.open(DATA_DIR / "runs" / rid / "impact.tif") as src:
+        cls, tr, crs = src.read(1), src.transform, src.crs
+    pred = np.isin(cls, (1, 2, 3))
+    if aoi:
+        A = gpd.read_file(VAL / "aois.geojson")
+        A = A[A.aoi == aoi]
+        ref = rasterize([(g, 1) for g in _layers(aoi, "observedEventA").to_crs(crs).geometry],
+                        out_shape=cls.shape, transform=tr) > 0
+        sel = rasterize([(g, 1) for g in A.to_crs(crs).geometry], out_shape=cls.shape, transform=tr) > 0
+    out = {}
+    for c in cells:
+        (r0, r1), (c0, c1) = c["rows"], c["cols"]
+        M = pred[r0:r1, c0:c1]
+        if aoi and (sel[r0:r1, c0:c1] & M).sum() < 0.8 * M.sum():
+            continue
+        out[c["id"]] = bool(aoi) and float(ref[r0:r1, c0:c1][M].mean()) >= 0.5
+    return out
+
+
+def _split(aoi):
+    return "tuning" if aoi in (0, 1, 2) else "held-out"
+
+
+def _verdict_scores(g: pd.DataFrame) -> dict:
+    real, fake = g[g.real], g[~g.real]
+    conf = g[g.verdict == "confirmed"]
+    return {
+        "cells": int(len(g)), "cells_real_damage": int(len(real)), "cells_not_in_ems": int(len(fake)),
+        "confirmed_cells": int(len(conf)),
+        "confirmed_that_are_real_pct": round(100 * conf.real.mean(), 1) if len(conf) else None,
+        "false_confirmations": int((~conf.real).sum()),
+        "real_damage_ha_auto_confirmed_pct": round(100 * real[real.verdict == "confirmed"].ha.sum() / max(real.ha.sum(), 1e-9), 1),
+        "not_in_ems_ha_sent_to_human_pct": round(100 * fake[fake.verdict != "confirmed"].ha.sum() / max(fake.ha.sum(), 1e-9), 1)
+                                           if len(fake) else None,
+        "analyst_workload_cells": int((g.verdict != "confirmed").sum()),
+    }
+
+
 def inspection_check(aois=(1, 2, 3, 5), control="control tributary (Tadi Khola, real event date)") -> dict:
     """Run the inspector agent and score its verdicts against EMS: does it confirm only real damage,
     and does everything EMS did not map reach a human? A cell counts as real damage when >= 50 % of
     its flagged pixels fall inside EMS observed-event polygons. Tuning: AOI01, AOI02, Tadi Khola."""
     from . import inspector
-    rows = []
+    rows, runs = [], {}
     jobs = [(a, None) for a in aois] + [(0, next(t for t in FALSE_ALARM_TESTS if t["name"] == control))]
     for aoi, t in jobs:
         if aoi:
@@ -146,39 +188,67 @@ def inspection_check(aois=(1, 2, 3, 5), control="control tributary (Tadi Khola, 
         else:
             facts = run(t["bbox"], t["date"])
         rid = facts["run_id"]
+        runs[f"AOI{aoi:02d}" if aoi else "Tadi Khola"] = {"aoi": aoi, "run_id": rid}
         res = inspector.inspect(rid, max_cells=10_000, max_fetches=10_000)
-        with rasterio.open(DATA_DIR / "runs" / rid / "impact.tif") as src:
-            cls, tr, crs = src.read(1), src.transform, src.crs
-        pred = np.isin(cls, (1, 2, 3))
-        if aoi:
-            ref = rasterize([(g, 1) for g in _layers(aoi, "observedEventA").to_crs(crs).geometry],
-                            out_shape=cls.shape, transform=tr) > 0
-            sel = rasterize([(g, 1) for g in A.to_crs(crs).geometry], out_shape=cls.shape, transform=tr) > 0
+        truth = _cell_truth(aoi, rid, res["cells"])
         for c in res["cells"]:
-            (r0, r1), (c0, c1) = c["rows"], c["cols"]
-            M = pred[r0:r1, c0:c1]
-            if aoi and (sel[r0:r1, c0:c1] & M).sum() < 0.8 * M.sum():
-                continue            # mostly outside the area EMS analysed: cannot be scored
-            real = bool(aoi) and float(ref[r0:r1, c0:c1][M].mean()) >= 0.5
-            rows.append({"area": aoi or "Tadi Khola", "split": "tuning" if aoi in (0, 1, 2) else "held-out",
-                         "verdict": c["verdict"], "real": real, "ha": c["impact_ha"],
-                         "later_look": c["later"] is not None})
+            if c["id"] not in truth:
+                continue
+            rows.append({"area": aoi or "Tadi Khola", "split": _split(aoi), "verdict": c["verdict"],
+                         "real": truth[c["id"]], "ha": c["impact_ha"], "later_look": c["later"] is not None,
+                         "tools": [x["tool"] for x in c["trace"] if x["step"] == "act"]})
     df = pd.DataFrame(rows)
     out = {}
     for split, g in df.groupby("split"):
-        real, fake = g[g.real], g[~g.real]
-        conf = g[g.verdict == "confirmed"]
-        out[split] = {
-            "cells": int(len(g)), "cells_real_damage": int(len(real)), "cells_not_in_ems": int(len(fake)),
-            "confirmed_cells": int(len(conf)),
-            "confirmed_that_are_real_pct": round(100 * conf.real.mean(), 1) if len(conf) else None,
-            "real_damage_ha_auto_confirmed_pct": round(100 * real[real.verdict == "confirmed"].ha.sum() / max(real.ha.sum(), 1e-9), 1),
-            "not_in_ems_ha_sent_to_human_pct": round(100 * fake[fake.verdict != "confirmed"].ha.sum() / max(fake.ha.sum(), 1e-9), 1)
-                                               if len(fake) else None,
-            "analyst_workload_cells": int((g.verdict != "confirmed").sum()),
-            "later_looks": int(g.later_look.sum()),
-        }
+        out[split] = {**_verdict_scores(g), "later_looks": int(g.later_look.sum()),
+                      "realign_calls": int(g.tools.map(lambda x: "vision.realign" in x).sum()),
+                      "zoom_calls": int(g.tools.map(lambda x: "vision.zoom" in x).sum())}
     out["per_area"] = df.groupby(["area", "verdict"]).agg(cells=("ha", "size"), ha=("ha", "sum")).round(1).reset_index().to_dict("records")
+    out["runs"] = runs
+    return out
+
+
+POST_BANDS = ("red_post", "green_post", "blue_post", "ndvi_post", "ndwi_post")
+
+
+def robustness_check(shifts=(0.0, 1.5, 3.0, 5.0)) -> dict:
+    """Misregistration stress test of the inspector's OpenCV tools.
+
+    The after images of every scored cell are shifted by a known amount (Sentinel-2 is specified
+    well under a pixel; other sensors, processing baselines and cloud-masked composites can be off by
+    several) and each cell is settled twice, without later looks so only perception and the OpenCV
+    tools differ: 'ecc_only' = ECC co-registration only (the agent before realign/zoom), 'agent' =
+    with realign (SIFT + USAC MAGSAC++) and zoom. Uses the runs of the last inspection_check()."""
+    import cv2
+    from . import inspector, vision
+    runs = json.loads((ROOT / "docs" / "validation_inspector.json").read_text())["runs"]
+    P = inspector.RulePlanner()
+    rows = []
+    for name, r in runs.items():
+        ev0 = vision.load(DATA_DIR / "runs" / r["run_id"])
+        cells = vision.cells(DATA_DIR / "runs" / r["run_id"], ev0)
+        truth = _cell_truth(r["aoi"], r["run_id"], cells)
+        cells = [c for c in cells if c["id"] in truth]
+        for sh in shifts:
+            ev = ev0
+            if sh:
+                A = np.float32([[1, 0, 0.8 * sh], [0, 1, -0.6 * sh]])
+                bands = dict(ev0.bands)
+                for b in POST_BANDS:
+                    bands[b] = cv2.warpAffine(ev0.bands[b], A, ev0.bands[b].shape[::-1], flags=cv2.INTER_LINEAR,
+                                              borderMode=cv2.BORDER_REFLECT)
+                ev = vision.Evidence(bands, ev0.impact, ev0.classes, ev0.transform, ev0.crs, ev0.run_dir)
+            for c in cells:
+                for variant, tools in (("ecc_only", ()), ("agent", ("realign", "zoom"))):
+                    res = inspector.settle(ev, c, P, tools=tools)
+                    rows.append({"area": name, "split": _split(r["aoi"]), "shift_px": sh, "variant": variant,
+                                 "real": truth[c["id"]], "ha": c["impact_ha"], "verdict": res["verdict"],
+                                 "realigned": res["state"]["realign"] == "ok"})
+    df = pd.DataFrame(rows)
+    out = {"method": " ".join(robustness_check.__doc__.split()), "results": []}
+    for (split, sh, variant), g in df.groupby(["split", "shift_px", "variant"]):
+        out["results"].append({"split": split, "shift_px": sh, "variant": variant, **_verdict_scores(g),
+                               "realigned_cells": int(g.realigned.sum())})
     return out
 
 
@@ -187,7 +257,14 @@ def main():
     ap.add_argument("--aoi", nargs="+", type=int, default=[1, 2, 3, 5])
     ap.add_argument("--no-false-alarm", action="store_true")
     ap.add_argument("--inspection", action="store_true", help="score the inspector agent (docs/validation_inspector.json)")
+    ap.add_argument("--robustness", action="store_true",
+                    help="misregistration stress test of the inspector (docs/validation_robustness.json)")
     a = ap.parse_args()
+    if a.robustness:
+        r = robustness_check()
+        (ROOT / "docs" / "validation_robustness.json").write_text(json.dumps(r, indent=1))
+        print(json.dumps(r, indent=1))
+        return
     if a.inspection:
         r = inspection_check()
         (ROOT / "docs" / "validation_inspector.json").write_text(json.dumps(r, indent=1))

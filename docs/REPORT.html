@@ -15,6 +15,8 @@ Code: see README. Case study: Bhote Koshi–Trishuli glacier-outburst flood, Nep
 <li>a <strong>damage overlay</strong> of pre-event OpenStreetMap buildings, roads, bridges and health facilities;</li>
 <li>a <strong>cut-off analysis</strong> that removes impacted road segments and damaged bridges from the road graph and finds settlements that lost every link to a town, a health facility or the wider network;</li>
 <li>a <strong>situation-report copilot</strong> (English + Nepali) that answers only from these results, with an automatic number checker;</li>
+<li>an <strong>inspector agent</strong> that re-examines the map with OpenCV 5 in a perceive → decide → act loop (re-align, zoom, look again weeks later) and sends whatever it cannot confirm to a human;</li>
+<li><strong>verifiable reports</strong>: SHA-256 Merkle fingerprints anchored on a public chain, which anyone can re-run and check;</li>
 <li>a <strong>dashboard</strong>, a printable <strong>one-page situation report</strong> (EN/NE) and a <strong>flood-path tracer</strong> (bonus).</li>
 </ul>
 <h2>2. Data rules</h2>
@@ -56,7 +58,7 @@ Code: see README. Case study: Bhote Koshi–Trishuli glacier-outburst flood, Nep
 <p><strong>3.3 Optical change (Sentinel-2).</strong> Monsoon cloud rarely leaves a clean scene, so we build per-pixel cloud-free median composites from the Scene Classification Layer over 45 days before and 40 days after the event. Reflectance is harmonised for processing baseline ≥ 04.00. Stripped vegetation shows as NDVI loss and new water or wet sediment as NDWI gain.</p>
 <p><strong>3.4 Fusion (OpenCV).</strong> A pixel is impacted if it is on the valley floor (HAND ≤ 80 m) <strong>and</strong> shows change: optical where both composites are clear, radar elsewhere (smoothed |z| ≥ 1.0). Then come morphological opening/closing, a rule that patches must touch the river channel (a flood arrives from the river, not mid-slope) and a 2 ha minimum. Clear-sky ground that is bare or water after the event and connected to ≥ 5 ha of detected change is added. This captures the riverbed and gravel bars the surge ran through, which had no vegetation to lose. Ground that was bare <em>before</em> the event too, added only by this connectivity, is kept as a separate <strong>lower-confidence riverbed</strong> class.</p>
 <p><strong>3.5 Damage.</strong> A building, bridge or health facility is <em>likely affected</em> if it intersects impact and <em>possibly affected</em> within 20 m. We also report road length inside impact, by class.</p>
-<p><strong>3.6 Who is cut off.</strong> OSM roads become a graph (every vertex a node, so mid-way junctions count) for two networks: <em>vehicle</em> (motorable roads and tracks) and <em>foot</em> (plus paths, which matter in the hills). Impacted segments and likely-damaged bridges are removed. Destinations are towns/cities, health facilities and road exits at the area's edge. Settlements are OSM places plus clusters of ≥ 8 buildings without a named place, so unmapped hamlets count. Each settlement is tested through up to 25 of its own buildings, each snapped to its nearest road, so one flooded junction next to the place's map point cannot strand a whole suburb. A settlement is <strong>cut off</strong> if none of its buildings can reach any destination after the flood, and <strong>partly cut</strong> if some can't or it lost a destination type. We report the share of its buildings with no road left and <strong>people stranded</strong> = people × that share. We also compute road distance to the nearest health facility before and after. People = buildings × 4.37 (Nepal 2021 census household size), always labelled as an estimate.</p>
+<p><strong>3.6 Who is cut off.</strong> OSM roads become a graph (every vertex a node, so mid-way junctions count) for two networks: <em>vehicle</em> (motorable roads and tracks) and <em>foot</em> (plus paths, which matter in the hills). Impacted segments and likely-damaged bridges are removed. Destinations are towns/cities, health facilities and road exits at the area's edge. Settlements are OSM places plus clusters of ≥ 8 buildings without a named place, so unmapped hamlets count. Each settlement is tested through up to 25 of its own buildings, each snapped to its nearest road, so one flooded junction next to the place's map point cannot strand a whole suburb. Buildings are put in a canonical (coordinate) order before sampling, so an independent re-run samples the same houses: an independent verifier caught this when its fresh OSM download arrived in a different order and Syabru Bensi's estimate came out 988 instead of 1,200 people stranded. A settlement is <strong>cut off</strong> if none of its buildings can reach any destination after the flood, and <strong>partly cut</strong> if some can't or it lost a destination type. We report the share of its buildings with no road left and <strong>people stranded</strong> = people × that share. We also compute road distance to the nearest health facility before and after. People = buildings × 4.37 (Nepal 2021 census household size), always labelled as an estimate.</p>
 <p><strong>3.7 Flood path (bonus).</strong> From any clicked point, snapped to the nearest stream, we follow D8 steepest descent downstream and list settlements within 400 m of the path whose lowest part is ≤ 80 m above the river, ordered by distance. Times use an <em>assumed</em> 4 m/s surge and are labelled as such.</p>
 <p><strong>3.8 AI component: situation-report copilot.</strong> An LLM (Amazon Bedrock, default Amazon Nova Pro; or any OpenAI-compatible model) with six read-only tools over the run's results. Rules: answer in the user's language (English/Nepali) and copy every number from a tool result. A <strong>verifier</strong> extracts every number from the draft (ASCII or Devanagari digits) and checks it against the tool results of that conversation. On failure the model gets one retry naming the bad numbers; numbers that still fail are masked <code>[unverified]</code> and flagged in the UI. Without an LLM, a deterministic router answers the common questions from the same tools. The one-page report is template-based, so its numbers are exactly the pipeline's.</p>
 <h2>4. Case study: EMSR927 comparison</h2>
@@ -213,12 +215,163 @@ Code: see README. Case study: Bhote Koshi–Trishuli glacier-outburst flood, Nep
 </table>
 <p><strong>Copilot evaluation</strong> (<code>scripts/eval_copilot.py</code>, Amazon Nova Pro on Bedrock, Syapru Besi run, 13 questions: 9 English, 4 Nepali; transcript in <code>docs/copilot_eval.json</code>). <strong>13 of 13 answers fully verified (106 numbers), no retries.</strong> In an earlier run, one answer (a 5-line situation report) multiplied buildings by household size on its own. The verifier rejected the number, the retry repeated it and it was masked as <code>[unverified]</code>, so no invented figure reached the user. The pipeline now computes that figure itself (<code>people_est_in_likely_affected_buildings</code>). Asked "How many people died?", the copilot says the maps contain no casualty data and gives no number. Each answer takes 2–7 s.</p>
 <p><strong>Another event, untouched by tuning: Melamchi flood, 15 Jun 2021.</strong> We ran the same code, with no changes, on a different year, catchment and Sentinel-2 processing baseline (bbox 85.54–85.62 E, 27.80–27.92 N; 266 s cold). It mapped 954 ha of impact, 855 buildings likely affected and 20 bridges likely damaged. <strong>Melamchi Bazar</strong>, the town devastated in that flood, loses road access to its health post (12 km before, no route after), with 56% of its buildings left without a road. The first post-event radar image was 20 Jun 2021, five days after the flood. We have no EMS-style reference for this event, so this check is qualitative.</p>
-<p><strong>A flat, urban flood: Kathmandu Valley, 27–28 Sep 2024.</strong> This is the opposite of a Himalayan gorge, and it exposed two weaknesses that we fixed before freezing the code. First, roofs and streets are "bare" in Sentinel-2, so riverbed growth ran through the city (1,062 ha, 34,502 buildings "hit"). Pre-event OSM building footprints now block riverbed growth: 281 ha, along the Bagmati, Nakkhu, Balkhu and Manohara, the rivers that overflowed. Second, one flooded junction next to a place's map point stranded whole suburbs (Balkhu, Kalanki). The building-sampled cut-off test (3.6) fixed that: no settlement is cut off in the redundant city grid, and about 8,300 people's buildings lost road access, mostly near the Manohara. Both fixes cost a little on the EMS areas (Phosretar destroyed-building recall 96% → 90%). We kept them, because a judge's area can be anywhere.</p>
+<p><strong>A flat, urban flood: Kathmandu Valley, 27–28 Sep 2024.</strong> This is the opposite of a Himalayan gorge, and it exposed two weaknesses that we fixed before freezing the code. First, roofs and streets are "bare" in Sentinel-2, so riverbed growth ran through the city (1,062 ha, 34,502 buildings "hit"). Pre-event OSM building footprints now block riverbed growth: 281 ha, along the Bagmati, Nakkhu, Balkhu and Manohara, the rivers that overflowed. Second, one flooded junction next to a place's map point stranded whole suburbs (Balkhu, Kalanki). The building-sampled cut-off test (3.6) fixed that: no settlement is cut off in the redundant city grid, and about 7,200 people's buildings lost road access, mostly near the Manohara. Both fixes cost a little on the EMS areas (Phosretar destroyed-building recall 96% → 90%). We kept them, because a judge's area can be anywhere.</p>
 <p><img src="figures/melamchi_2021.png" style="width:45%"> <img src="figures/kathmandu_2024.png" style="width:45%"></p>
-<h2>5. Dashboard, report and copilot</h2>
+<h2>5. Inspector agent (OpenCV 5)</h2>
+<p>A per-pixel map is a first draft. The inspector agent (<code>waterguard/inspector.py</code>, <code>waterguard/vision.py</code>) re-examines it in 600 m cells, most exposed first (buildings hit × 10 + road segments cut × 25 + people nearby × 0.05), in a perceive → decide → act loop that runs until each cell is settled or 4 tool calls are spent.</p>
+<p><img src="figures/agent.png" style="width:100%"></p>
+<p><strong>5.1 Perception.</strong> Every measure compares the flagged ground in the cell with nearby <em>unflagged</em> valley ground (HAND 3–80 m, at least 50 m from any flagged pixel), because a whole scene can brighten, dry out or green up between two dates; only the contrast counts.</p>
+<table>
+<thead>
+<tr>
+<th>Measure</th>
+<th>OpenCV 5</th>
+<th>What it catches</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Co-registration</td>
+<td><code>findTransformECC</code> (translation, on Sobel gradient magnitude so the flood's brightness change doesn't drive it), <code>warpAffine</code></td>
+<td>sub-pixel offsets between the before and after composites</td>
+</tr>
+<tr>
+<td>Colour change</td>
+<td><code>cvtColor</code> to CIELAB, ΔE per pixel</td>
+<td>grey debris and sand replacing forest or fields</td>
+</tr>
+<tr>
+<td>Structure</td>
+<td>SSIM from <code>GaussianBlur</code> moments on L*</td>
+<td>new surface pattern (boulders, scour)</td>
+</tr>
+<tr>
+<td>Texture</td>
+<td><code>Laplacian</code>, local variance ratio</td>
+<td>smoothed or roughened ground</td>
+</tr>
+<tr>
+<td>Correspondence</td>
+<td><code>DISOpticalFlow</code> both ways, <code>remap</code>; forward–backward error and median flow over reference ground</td>
+<td>ground that only shifted (consistent flow) vs ground that was replaced (no match); misalignment left after ECC</td>
+</tr>
+<tr>
+<td>Edge artefacts</td>
+<td><code>Canny</code> + <code>dilate</code> on the before image</td>
+<td>"change" that sits on edges that already existed (a misregistration signature)</td>
+</tr>
+<tr>
+<td>Shape</td>
+<td><code>findContours</code>, <code>minAreaRect</code>, <code>convexHull</code></td>
+<td>elongated, solid debris tongues vs speckle</td>
+</tr>
+<tr>
+<td>Analyst chip</td>
+<td><code>resize</code>, CLAHE, <code>applyColorMap</code> (TURBO), <code>drawContours</code>, <code>putText</code>, <code>hconcat</code></td>
+<td>before / after (aligned) / ΔE with the flagged outline</td>
+</tr>
+</tbody>
+</table>
+<p>Together with Sentinel-2 NDVI loss and Sentinel-1 |z| these give four <strong>evidence lines</strong>: colour (ΔE contrast ≥ 12), vegetation (NDVI-loss contrast ≥ 0.10), structure (SSIM-dissimilarity contrast ≥ 0.15) and radar (|z| contrast ≥ 0.8), set on AOI01 + AOI02 and the Tadi Khola control.</p>
+<p><strong>5.2 Tools.</strong> <em>realign</em>: when ECC does not converge (or the dense flow over reference ground still shows &gt; 1.5 px), SIFT keypoints on CLAHE-equalised lightness (upsampled ×2), Lowe's ratio test, and an affine model fitted with <strong>USAC MAGSAC++</strong> (<code>estimateAffine2D(method=USAC_MAGSAC)</code>). Keypoints on changed ground have no true match and fall out as outliers. Models with more than 2 % scale change, 1° rotation, shear or a 6 px shift are rejected (Sentinel-2 to Sentinel-2 is a pure shift). <em>zoom</em>: the same measures on each 300 m quadrant, so a debris lobe is not averaged away by unchanged ground; the cell is confirmed if quadrants where all four lines agree hold ≥ 60 % of its flagged ground. <em>look_later</em>: a new cloud-free Sentinel-2 composite of only this cell's window, from 40 days after the event, measured again: debris and scour persist; wet soil, turbid water and green-up do not.</p>
+<p><strong>5.3 Decisions and guard rails.</strong> Confirm when all four lines agree, when strong quadrants dominate, or when three lines agree (two under cloud) and the colour change persists weeks later. Flag (never remove) when the ground reverted. Everything else goes to an analyst with the chip, the measurements, the agent's reason and the full trace. With <code>--planner llm</code>, a language model chooses the next tool from the same state; the evidence bar, the one-use-per-tool rule and the step budget are enforced in code, so the model can steer the inspection but not lower the bar. The agent never removes impact: only an analyst's <em>Remove</em> does, by re-running the pipeline with that cell vetoed, and a report is anchored only when the queue is empty.</p>
+<p><strong>5.4 Evaluation.</strong> <code>python -m waterguard.validate --inspection</code> runs the agent on all four EMS areas and the Tadi Khola control. A cell is real damage when ≥ 50 % of its flagged pixels are inside EMS observed-event polygons.</p>
+<table>
+<thead>
+<tr>
+<th></th>
+<th>Cells</th>
+<th>Confirmed</th>
+<th>of which real</th>
+<th>Real damage area auto-confirmed</th>
+<th>Not-in-EMS area sent to a human</th>
+<th>Later looks</th>
+<th>realign / zoom calls</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Tuning (AOI01, AOI02, Tadi Khola)</td>
+<td>30</td>
+<td>13</td>
+<td>100 %</td>
+<td>52 %</td>
+<td>100 % (8 of 8 cells)</td>
+<td>16</td>
+<td>18 / 21</td>
+</tr>
+<tr>
+<td><strong>Held-out (AOI03, AOI05)</strong></td>
+<td>113</td>
+<td>67</td>
+<td><strong>98.5 %</strong></td>
+<td><strong>68.6 %</strong></td>
+<td>40 % (1 of 2 cells)</td>
+<td>31</td>
+<td>12 / 43</td>
+</tr>
+</tbody>
+</table>
+<p>The agent before the realign and zoom tools (ECC only) scored 98.5 % / 66.7 % with 34 later looks on the same held-out cells. <strong>Failure cases.</strong> One held-out cell in Bidur (1.5 ha) that EMS did not map was confirmed: colour, vegetation and structure agreed (radar did not), zoom found no dominant quadrant, and the colour change persisted in the later image. The 8 Tadi Khola cells show vegetation, structure and sometimes radar change from the monsoon, but never the ΔE of fresh debris; colour is the line that separates them, which is why the agent will not confirm without it. In AOI05 (Phosretar) 30 of 51 scored cells still go to a person: most show only one or two lines (typically structure, or structure and radar) and the agent judges that too weak for a later image to settle.</p>
+<p><strong>5.5 Stress test: misaligned imagery.</strong> <code>python -m waterguard.validate --robustness</code> shifts the after bands of every scored cell by 0, 1.5, 3 and 5 px and settles each cell with and without the realign/zoom tools, with no later looks (so no downloads, and only perception differs). Held-out areas:</p>
+<table>
+<thead>
+<tr>
+<th>Shift</th>
+<th>0 px</th>
+<th>1.5 px</th>
+<th>3 px</th>
+<th>5 px</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Real damage auto-confirmed, ECC only</td>
+<td>49.0 %</td>
+<td>31.3 %</td>
+<td>4.2 %</td>
+<td>0.4 %</td>
+</tr>
+<tr>
+<td>Real damage auto-confirmed, with realign + zoom</td>
+<td>52.9 %</td>
+<td>55.6 %</td>
+<td>50.6 %</td>
+<td>50.9 %</td>
+</tr>
+<tr>
+<td>Cells realigned by SIFT + MAGSAC++</td>
+<td>11</td>
+<td>37</td>
+<td>84</td>
+<td>97</td>
+</tr>
+<tr>
+<td>False confirmations (either)</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+<td>0</td>
+</tr>
+</tbody>
+</table>
+<p>Misregistration does not produce false confirmations here, because each measure is a contrast with reference ground that moved too. It blinds the agent instead: at 3 px the ECC-only agent sends 108 of 113 cells to an analyst. Unit tests (<code>tests/test_vision.py</code>) check that realign recovers a 3.2 / 1.7 px shift with a third of the ground replaced (ECC fails on it), that it refuses unrelated images, and that the forward–backward flow separates shifted from replaced ground.</p>
+<h2>6. Architecture and AWS deployment</h2>
+<p><img src="figures/architecture.png" style="width:100%"></p>
+<p>One Docker image (<code>Dockerfile</code>, pinned <code>requirements.txt</code>) holds the FastAPI dashboard, the pipeline and the agent. On AWS (<code>deploy/aws_deploy.sh</code>, <code>deploy/user-data.sh</code>) it runs on one EC2 <code>t3.xlarge</code> behind <strong>CloudFront</strong> (HTTPS; the security group admits only CloudFront's origin-facing prefix list; IMDSv2 required). The boot script pulls the app and data bundles from <strong>S3</strong> and the secrets from <strong>SSM Parameter Store</strong> (encrypted), so no keys are in the image or the repo. The LLM planner and copilot call <strong>Amazon Bedrock</strong> through the instance role. Container logs go to <strong>CloudWatch Logs</strong> (<code>/waterguard/app</code>); the inspector writes one Embedded Metric Format line per decision, which CloudWatch turns into the <code>WaterGuard/Inspector</code> metrics (cells by verdict and planner, tool calls, seconds per cell, later looks per run) without metrics API calls. The IAM role is limited to reading the deploy bucket and <code>/waterguard/*</code> parameters, invoking models and writing <code>/waterguard/*</code> logs. Only one flood run executes at a time; others queue. Reproducibility: every run's outputs are fingerprinted (SHA-256 Merkle roots, <code>waterguard/ledger.py</code>); independent re-runs on a Windows laptop and on an AWS Linux server reproduce the settlement-claims root byte for byte.</p>
+<h2>7. Responsible use</h2>
+<ul>
+<li><strong>Decision support, not a decision.</strong> Outputs are labelled satellite-derived and unverified on the ground; people counts are estimates and are labelled so.</li>
+<li><strong>Humans decide removals.</strong> The agent can confirm or queue, never delete; every analyst decision is recorded with who and when, and published reports say how many cells were left unreviewed.</li>
+<li><strong>No invented numbers.</strong> The copilot can only quote numbers present in tool results (number verifier); the one-page report is template-based.</li>
+<li><strong>Open data and open code only,</strong> so anyone can re-run a report and check it; the EMS reference maps are used only for scoring.</li>
+<li><strong>Privacy.</strong> Inputs are public satellite imagery at 10 m and public OpenStreetMap; no personal data is collected. The public demo's review queue is read-only.</li>
+<li><strong>Known failure modes are published</strong> (sections 5.4 and 9), including where the agent defers.</li>
+</ul>
+<h2>8. Dashboard, report and copilot</h2>
 <p><img src="screenshots/dashboard.png" style="width:100%"></p>
 <p>The dashboard (<code>python -m waterguard.server</code>) takes a drawn box and a date and shows progress, then layers: impact, Sentinel-2 before/after, radar change, buildings hit, roads cut, bridges, and settlements coloured by road status. A side panel has the situation tiles, cut-off and bridge lists, the copilot, the one-page report (EN/NE), the flood-path tool and a <em>Basis</em> tab. That tab lists every satellite image used and the OSM audit.</p>
-<h2>6. Limitations: what WaterGuard cannot do</h2>
+<h2>9. Limitations: what WaterGuard cannot do</h2>
 <ul>
 <li><strong>No early warning.</strong> Sentinel-1 revisits each track every 12 days (two tracks here, so a new look every few days) and Sentinel-2 every 5 days, cloud permitting. WaterGuard maps damage <em>after</em> the fact. It cannot warn of a glacier collapse minutes ahead. In the case study the first post-event radar image came about 2.6 days after the flood (28 Aug 12:21 UTC).</li>
 <li><strong>Radar blind spots.</strong> Steep slopes facing towards or away from the satellite (layover/shadow) cannot be assessed from that track. We mask them rather than guess. Narrow gorges are hard at 10 m.</li>
@@ -233,7 +386,8 @@ Code: see README. Case study: Bhote Koshi–Trishuli glacier-outburst flood, Nep
 <li><strong>Valley-floor prior.</strong> Impact is only mapped below 80 m HAND. Landslides high on the slopes, which EMS also mapped, are out of scope.</li>
 <li><strong>Tuned on one event.</strong> Thresholds come from two EMSR927 areas and were checked on two held-out areas plus false-alarm tests, but not on other flood types (e.g. plains riverine floods).</li>
 <li><strong>The copilot can still be wrong in words.</strong> The verifier guarantees numbers, not the reasoning around them. The Nepali report templates have not yet been reviewed by a native speaker.</li>
+<li><strong>The inspector is tuned on one event too.</strong> Its evidence lines were set on AOI01/02 and one control valley; held-out precision rests on 67 confirmed cells and only 2 held-out cells outside EMS, so its false-confirmation rate is not yet well measured.</li>
 <li><strong>Run time.</strong> A cold run over about 30 km² takes 3–5 minutes, almost all of it downloading imagery from Planetary Computer.</li>
 </ul>
-<h2>7. Attribution and citations</h2>
+<h2>10. Attribution and citations</h2>
 <p>Contains modified Copernicus Sentinel data 2026. Produced using Copernicus WorldDEM-30 © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018 provided under COPERNICUS by the European Union and ESA; all rights reserved. © OpenStreetMap contributors (ODbL), via the ohsome API (HeiGIT). Validation only: European Union, Copernicus Emergency Management Service data (EMSR927). Lindsay, J. B. (2016), <em>Whitebox GAT</em>, Computers &amp; Geosciences 95. Nobre, A. D. et al. (2011), HAND, <em>J. Hydrology</em> 404. National Statistics Office Nepal (2021), <em>National Population and Housing Census 2021</em> (average household size 4.37).</p></body></html>

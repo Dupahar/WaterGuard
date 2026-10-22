@@ -11,6 +11,8 @@ When roads, bridges and phone lines fail, rescuers need three answers fast: **wh
 - a **damage overlay** of pre-event OpenStreetMap buildings, roads, bridges and health facilities;
 - a **cut-off analysis** that removes impacted road segments and damaged bridges from the road graph and finds settlements that lost every link to a town, a health facility or the wider network;
 - a **situation-report copilot** (English + Nepali) that answers only from these results, with an automatic number checker;
+- an **inspector agent** that re-examines the map with OpenCV 5 in a perceive → decide → act loop (re-align, zoom, look again weeks later) and sends whatever it cannot confirm to a human;
+- **verifiable reports**: SHA-256 Merkle fingerprints anchored on a public chain, which anyone can re-run and check;
 - a **dashboard**, a printable **one-page situation report** (EN/NE) and a **flood-path tracer** (bonus).
 
 ## 2. Data rules
@@ -68,13 +70,73 @@ FALSE_ALARM_TABLE
 
 <img src="figures/melamchi_2021.png" style="width:45%"> <img src="figures/kathmandu_2024.png" style="width:45%">
 
-## 5. Dashboard, report and copilot
+## 5. Inspector agent (OpenCV 5)
+
+A per-pixel map is a first draft. The inspector agent (`waterguard/inspector.py`, `waterguard/vision.py`) re-examines it in 600 m cells, most exposed first (buildings hit × 10 + road segments cut × 25 + people nearby × 0.05), in a perceive → decide → act loop that runs until each cell is settled or 4 tool calls are spent.
+
+<img src="figures/agent.png" style="width:100%">
+
+**5.1 Perception.** Every measure compares the flagged ground in the cell with nearby *unflagged* valley ground (HAND 3–80 m, at least 50 m from any flagged pixel), because a whole scene can brighten, dry out or green up between two dates; only the contrast counts.
+
+| Measure | OpenCV 5 | What it catches |
+|---|---|---|
+| Co-registration | `findTransformECC` (translation, on Sobel gradient magnitude so the flood's brightness change doesn't drive it), `warpAffine` | sub-pixel offsets between the before and after composites |
+| Colour change | `cvtColor` to CIELAB, ΔE per pixel | grey debris and sand replacing forest or fields |
+| Structure | SSIM from `GaussianBlur` moments on L* | new surface pattern (boulders, scour) |
+| Texture | `Laplacian`, local variance ratio | smoothed or roughened ground |
+| Correspondence | `DISOpticalFlow` both ways, `remap`; forward–backward error and median flow over reference ground | ground that only shifted (consistent flow) vs ground that was replaced (no match); misalignment left after ECC |
+| Edge artefacts | `Canny` + `dilate` on the before image | "change" that sits on edges that already existed (a misregistration signature) |
+| Shape | `findContours`, `minAreaRect`, `convexHull` | elongated, solid debris tongues vs speckle |
+| Analyst chip | `resize`, CLAHE, `applyColorMap` (TURBO), `drawContours`, `putText`, `hconcat` | before / after (aligned) / ΔE with the flagged outline |
+
+Together with Sentinel-2 NDVI loss and Sentinel-1 |z| these give four **evidence lines**: colour (ΔE contrast ≥ 12), vegetation (NDVI-loss contrast ≥ 0.10), structure (SSIM-dissimilarity contrast ≥ 0.15) and radar (|z| contrast ≥ 0.8), set on AOI01 + AOI02 and the Tadi Khola control.
+
+**5.2 Tools.** *realign*: when ECC does not converge (or the dense flow over reference ground still shows > 1.5 px), SIFT keypoints on CLAHE-equalised lightness (upsampled ×2), Lowe's ratio test, and an affine model fitted with **USAC MAGSAC++** (`estimateAffine2D(method=USAC_MAGSAC)`). Keypoints on changed ground have no true match and fall out as outliers. Models with more than 2 % scale change, 1° rotation, shear or a 6 px shift are rejected (Sentinel-2 to Sentinel-2 is a pure shift). *zoom*: the same measures on each 300 m quadrant, so a debris lobe is not averaged away by unchanged ground; the cell is confirmed if quadrants where all four lines agree hold ≥ 60 % of its flagged ground. *look_later*: a new cloud-free Sentinel-2 composite of only this cell's window, from 40 days after the event, measured again: debris and scour persist; wet soil, turbid water and green-up do not.
+
+**5.3 Decisions and guard rails.** Confirm when all four lines agree, when strong quadrants dominate, or when three lines agree (two under cloud) and the colour change persists weeks later. Flag (never remove) when the ground reverted. Everything else goes to an analyst with the chip, the measurements, the agent's reason and the full trace. With `--planner llm`, a language model chooses the next tool from the same state; the evidence bar, the one-use-per-tool rule and the step budget are enforced in code, so the model can steer the inspection but not lower the bar. The agent never removes impact: only an analyst's *Remove* does, by re-running the pipeline with that cell vetoed, and a report is anchored only when the queue is empty.
+
+**5.4 Evaluation.** `python -m waterguard.validate --inspection` runs the agent on all four EMS areas and the Tadi Khola control. A cell is real damage when ≥ 50 % of its flagged pixels are inside EMS observed-event polygons.
+
+| | Cells | Confirmed | of which real | Real damage area auto-confirmed | Not-in-EMS area sent to a human | Later looks | realign / zoom calls |
+|---|---|---|---|---|---|---|---|
+| Tuning (AOI01, AOI02, Tadi Khola) | 30 | 13 | 100 % | 52 % | 100 % (8 of 8 cells) | 16 | 18 / 21 |
+| **Held-out (AOI03, AOI05)** | 113 | 67 | **98.5 %** | **68.6 %** | 40 % (1 of 2 cells) | 31 | 12 / 43 |
+
+The agent before the realign and zoom tools (ECC only) scored 98.5 % / 66.7 % with 34 later looks on the same held-out cells. **Failure cases.** One held-out cell in Bidur (1.5 ha) that EMS did not map was confirmed: colour, vegetation and structure agreed (radar did not), zoom found no dominant quadrant, and the colour change persisted in the later image. The 8 Tadi Khola cells show vegetation, structure and sometimes radar change from the monsoon, but never the ΔE of fresh debris; colour is the line that separates them, which is why the agent will not confirm without it. In AOI05 (Phosretar) 30 of 51 scored cells still go to a person: most show only one or two lines (typically structure, or structure and radar) and the agent judges that too weak for a later image to settle.
+
+**5.5 Stress test: misaligned imagery.** `python -m waterguard.validate --robustness` shifts the after bands of every scored cell by 0, 1.5, 3 and 5 px and settles each cell with and without the realign/zoom tools, with no later looks (so no downloads, and only perception differs). Held-out areas:
+
+| Shift | 0 px | 1.5 px | 3 px | 5 px |
+|---|---|---|---|---|
+| Real damage auto-confirmed, ECC only | 49.0 % | 31.3 % | 4.2 % | 0.4 % |
+| Real damage auto-confirmed, with realign + zoom | 52.9 % | 55.6 % | 50.6 % | 50.9 % |
+| Cells realigned by SIFT + MAGSAC++ | 11 | 37 | 84 | 97 |
+| False confirmations (either) | 0 | 0 | 0 | 0 |
+
+Misregistration does not produce false confirmations here, because each measure is a contrast with reference ground that moved too. It blinds the agent instead: at 3 px the ECC-only agent sends 108 of 113 cells to an analyst. Unit tests (`tests/test_vision.py`) check that realign recovers a 3.2 / 1.7 px shift with a third of the ground replaced (ECC fails on it), that it refuses unrelated images, and that the forward–backward flow separates shifted from replaced ground.
+
+## 6. Architecture and AWS deployment
+
+<img src="figures/architecture.png" style="width:100%">
+
+One Docker image (`Dockerfile`, pinned `requirements.txt`) holds the FastAPI dashboard, the pipeline and the agent. On AWS (`deploy/aws_deploy.sh`, `deploy/user-data.sh`) it runs on one EC2 `t3.xlarge` behind **CloudFront** (HTTPS; the security group admits only CloudFront's origin-facing prefix list; IMDSv2 required). The boot script pulls the app and data bundles from **S3** and the secrets from **SSM Parameter Store** (encrypted), so no keys are in the image or the repo. The LLM planner and copilot call **Amazon Bedrock** through the instance role. Container logs go to **CloudWatch Logs** (`/waterguard/app`); the inspector writes one Embedded Metric Format line per decision, which CloudWatch turns into the `WaterGuard/Inspector` metrics (cells by verdict and planner, tool calls, seconds per cell, later looks per run) without metrics API calls. The IAM role is limited to reading the deploy bucket and `/waterguard/*` parameters, invoking models and writing `/waterguard/*` logs. Only one flood run executes at a time; others queue. Reproducibility: every run's outputs are fingerprinted (SHA-256 Merkle roots, `waterguard/ledger.py`); independent re-runs on a Windows laptop and on an AWS Linux server reproduce the settlement-claims root byte for byte.
+
+## 7. Responsible use
+
+- **Decision support, not a decision.** Outputs are labelled satellite-derived and unverified on the ground; people counts are estimates and are labelled so.
+- **Humans decide removals.** The agent can confirm or queue, never delete; every analyst decision is recorded with who and when, and published reports say how many cells were left unreviewed.
+- **No invented numbers.** The copilot can only quote numbers present in tool results (number verifier); the one-page report is template-based.
+- **Open data and open code only,** so anyone can re-run a report and check it; the EMS reference maps are used only for scoring.
+- **Privacy.** Inputs are public satellite imagery at 10 m and public OpenStreetMap; no personal data is collected. The public demo's review queue is read-only.
+- **Known failure modes are published** (sections 5.4 and 9), including where the agent defers.
+
+## 8. Dashboard, report and copilot
 
 <img src="screenshots/dashboard.png" style="width:100%">
 
 The dashboard (`python -m waterguard.server`) takes a drawn box and a date and shows progress, then layers: impact, Sentinel-2 before/after, radar change, buildings hit, roads cut, bridges, and settlements coloured by road status. A side panel has the situation tiles, cut-off and bridge lists, the copilot, the one-page report (EN/NE), the flood-path tool and a *Basis* tab. That tab lists every satellite image used and the OSM audit.
 
-## 6. Limitations: what WaterGuard cannot do
+## 9. Limitations: what WaterGuard cannot do
 
 - **No early warning.** Sentinel-1 revisits each track every 12 days (two tracks here, so a new look every few days) and Sentinel-2 every 5 days, cloud permitting. WaterGuard maps damage *after* the fact. It cannot warn of a glacier collapse minutes ahead. In the case study the first post-event radar image came about 2.6 days after the flood (28 Aug 12:21 UTC).
 - **Radar blind spots.** Steep slopes facing towards or away from the satellite (layover/shadow) cannot be assessed from that track. We mask them rather than guess. Narrow gorges are hard at 10 m.
@@ -89,8 +151,9 @@ The dashboard (`python -m waterguard.server`) takes a drawn box and a date and s
 - **Valley-floor prior.** Impact is only mapped below 80 m HAND. Landslides high on the slopes, which EMS also mapped, are out of scope.
 - **Tuned on one event.** Thresholds come from two EMSR927 areas and were checked on two held-out areas plus false-alarm tests, but not on other flood types (e.g. plains riverine floods).
 - **The copilot can still be wrong in words.** The verifier guarantees numbers, not the reasoning around them. The Nepali report templates have not yet been reviewed by a native speaker.
+- **The inspector is tuned on one event too.** Its evidence lines were set on AOI01/02 and one control valley; held-out precision rests on 67 confirmed cells and only 2 held-out cells outside EMS, so its false-confirmation rate is not yet well measured.
 - **Run time.** A cold run over about 30 km² takes 3–5 minutes, almost all of it downloading imagery from Planetary Computer.
 
-## 7. Attribution and citations
+## 10. Attribution and citations
 
 Contains modified Copernicus Sentinel data 2026. Produced using Copernicus WorldDEM-30 © DLR e.V. 2010–2014 and © Airbus Defence and Space GmbH 2014–2018 provided under COPERNICUS by the European Union and ESA; all rights reserved. © OpenStreetMap contributors (ODbL), via the ohsome API (HeiGIT). Validation only: European Union, Copernicus Emergency Management Service data (EMSR927). Lindsay, J. B. (2016), *Whitebox GAT*, Computers & Geosciences 95. Nobre, A. D. et al. (2011), HAND, *J. Hydrology* 404. National Statistics Office Nepal (2021), *National Population and Housing Census 2021* (average household size 4.37).

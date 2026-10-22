@@ -11,9 +11,11 @@ How we enforce it:
   3. If no LLM is configured, a deterministic intent router answers from the same tools, so the
      copilot always works offline.
 
-LLM backends (first available wins): WATERGUARD_LLM=bedrock (Amazon Bedrock Converse, AWS creds)
-or openai (any OpenAI-compatible endpoint: OPENAI_BASE_URL + OPENAI_API_KEY + OPENAI_MODEL, e.g.
-Nebius Token Factory with an NVIDIA Nemotron model). WATERGUARD_LLM=offline forces the router.
+LLM backends (first available wins, or pick one with WATERGUARD_LLM):
+  nebius   NVIDIA Nemotron on Nebius Token Factory (NEBIUS_API_KEY; NEBIUS_MODEL, NEBIUS_BASE_URL)
+  openai   any other OpenAI-compatible endpoint (OPENAI_API_KEY; OPENAI_BASE_URL, OPENAI_MODEL)
+  bedrock  Amazon Bedrock Converse (AWS credentials; BEDROCK_MODEL)
+WATERGUARD_LLM=offline forces the deterministic router.
 """
 import json
 import os
@@ -245,10 +247,16 @@ def _mask(answer: str, bad: list[str]) -> str:
 
 
 # ---------------------------------------------------------------- LLM backends
+NEBIUS_BASE_URL = "https://api.tokenfactory.nebius.com/v1/"
+NEBIUS_MODEL = "nvidia/nemotron-3-super-120b-a12b"
+
+
 def _backend():
     want = os.getenv("WATERGUARD_LLM", "").lower()
     if want == "offline":
         return None
+    if want in ("", "nebius") and os.getenv("NEBIUS_API_KEY"):
+        return "nebius"
     if want in ("", "openai") and os.getenv("OPENAI_API_KEY"):
         return "openai"
     if want in ("", "bedrock"):
@@ -261,11 +269,20 @@ def _backend():
     return None
 
 
-def _call_openai(messages, tools):
+def openai_client():
+    """(client, model) for the OpenAI-compatible backend in use: Nebius Token Factory if a Nebius key
+    is set, else OPENAI_*."""
     from openai import OpenAI
-    cli = OpenAI(base_url=os.getenv("OPENAI_BASE_URL") or None, api_key=os.getenv("OPENAI_API_KEY"))
-    r = cli.chat.completions.create(model=os.getenv("OPENAI_MODEL", "nvidia/Llama-3_3-Nemotron-Super-49B-v1_5"),
-                                    messages=messages, temperature=0.1,
+    if os.getenv("NEBIUS_API_KEY") and os.getenv("WATERGUARD_LLM", "").lower() in ("", "nebius"):
+        return (OpenAI(base_url=os.getenv("NEBIUS_BASE_URL", NEBIUS_BASE_URL), api_key=os.getenv("NEBIUS_API_KEY")),
+                os.getenv("NEBIUS_MODEL", NEBIUS_MODEL))
+    return (OpenAI(base_url=os.getenv("OPENAI_BASE_URL") or None, api_key=os.getenv("OPENAI_API_KEY")),
+            os.getenv("OPENAI_MODEL", NEBIUS_MODEL))
+
+
+def _call_openai(messages, tools):
+    cli, model = openai_client()
+    r = cli.chat.completions.create(model=model, messages=messages, temperature=0.1,
                                     tools=[{"type": "function", "function": t} for t in tools])
     m = r.choices[0].message
     calls = [(c.id, c.function.name, json.loads(c.function.arguments or "{}")) for c in (m.tool_calls or [])]
@@ -320,7 +337,7 @@ def _offline(tools: RunTools, question: str, results: list) -> str:
 
 def _strip(text: str) -> str:
     """Remove model reasoning blocks some models emit (e.g. <thinking>...</thinking>)."""
-    return re.sub(r"<thinking>.*?</thinking>\s*", "", text or "", flags=re.S).strip()
+    return re.sub(r"<(thinking|think)>.*?</\1>\s*", "", text or "", flags=re.S).strip()
 
 
 # ---------------------------------------------------------------- main entry
@@ -340,7 +357,7 @@ def ask(run_id: str, question: str, history: list | None = None, point: dict | N
         messages.append({"role": h["role"], "content": h["text"]})
     lang = "Nepali (Devanagari script)" if _is_nepali(question) else "English"
     messages.append({"role": "user", "content": f"{question}\n\n[Reply in {lang}.]"})
-    call = _call_openai if backend == "openai" else _call_bedrock
+    call = _call_bedrock if backend == "bedrock" else _call_openai
 
     def loop(msgs):
         for _ in range(6):

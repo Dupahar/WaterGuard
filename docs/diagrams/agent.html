@@ -1,0 +1,89 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>WaterGuard inspector agent</title>
+<!-- Rendered to docs/figures/agent.png: see docs/diagrams/render.sh -->
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; width: 1800px; height: 1000px; background: #0b1220; color: #e6edf6;
+         font-family: "Segoe UI", Inter, Arial, sans-serif; position: relative; }
+  h1 { margin: 0; position: absolute; left: 48px; top: 30px; font-size: 34px; font-weight: 650; }
+  h1 span { color: #8aa0bd; font-weight: 400; font-size: 22px; margin-left: 14px; }
+  .box { position: absolute; border-radius: 14px; padding: 14px 18px; background: #15213a;
+         border: 1.5px solid #2c3d5c; font-size: 17px; line-height: 1.4; }
+  .box b { display: block; font-size: 21px; margin-bottom: 6px; }
+  .box small { color: #9fb1c9; font-size: 15.5px; }
+  .cv { border-color: #5ac8fa; background: #10283a; } .cv b { color: #7fd6ff; }
+  .agent { border-color: #b388ff; background: #1d1a3a; } .agent b { color: #cbb2ff; }
+  .tool { border-color: #5ac8fa; background: #0f2233; } .tool b { color: #7fd6ff; font-size: 19px; }
+  .end { border-color: #4cd08a; background: #10301f; } .end b { color: #6fe3a5; font-size: 19px; }
+  .human { border-color: #ffd166; background: #2d2810; } .human b { color: #ffd98a; font-size: 19px; }
+  .obs { border-color: #ff9900; background: #2a1f0e; } .obs b { color: #ffb84d; }
+  .k { font-family: Consolas, monospace; font-size: 15px; color: #c8d6ea; margin-top: 10px; line-height: 1.55; }
+  .rule { display: grid; grid-template-columns: 250px 1fr; }
+  .rule span:nth-child(2) { color: #cbb2ff; }
+  svg { position: absolute; left: 0; top: 0; }
+  .lbl { position: absolute; font-size: 15px; color: #9fb1c9; }
+</style>
+
+<h1>Inspector agent <span>perceive → decide → act, per 600 m cell, until the cell is settled</span></h1>
+
+<div class="box" style="left:48px;top:120px;width:300px"><b>Impact map</b><small>from the detection pipeline, tiled into 600 m cells, most exposed first (buildings hit, roads cut, people nearby)</small></div>
+
+<div class="box cv" style="left:400px;top:120px;width:490px"><b>Perceive · OpenCV 5</b>
+<small>flagged ground vs nearby unflagged valley ground</small>
+<div class="k">findTransformECC: sub-pixel co-registration<br>
+cvtColor → CIELAB ΔE: colour<br>
+SSIM from GaussianBlur moments: structure<br>
+Laplacian local variance: texture<br>
+DISOpticalFlow fwd/bwd: residual shift, unmatched ground<br>
+Canny: change on pre-existing edges<br>
+findContours · minAreaRect · convexHull: shape</div></div>
+
+<div class="box agent" style="left:940px;top:120px;width:430px"><b>Decide</b>
+<small>four evidence lines: colour · vegetation · structure · radar. Rule planner, or an LLM planner whose choice is checked against the same evidence bar</small>
+<div class="k">
+<div class="rule"><span>images misaligned</span><span>realign</span></div>
+<div class="rule"><span>2–3 lines agree</span><span>zoom</span></div>
+<div class="rule"><span>cloudy, or 3 lines</span><span>look_later</span></div>
+<div class="rule"><span>4 lines · strong quadrants · change persists later</span><span>confirm</span></div>
+<div class="rule"><span>change reverted later</span><span>flag</span></div>
+<div class="rule"><span>anything else</span><span>ask_human</span></div>
+</div></div>
+
+<div class="box tool" style="left:400px;top:560px;width:310px"><b>realign</b><small>SIFT on CLAHE lightness, ratio test, affine by USAC MAGSAC++ (changed ground drops out as outliers), warpAffine, measure again</small></div>
+<div class="box tool" style="left:740px;top:560px;width:310px"><b>zoom</b><small>measure the four 300 m quadrants on their own: a debris lobe is not averaged away by unchanged ground</small></div>
+<div class="box tool" style="left:1080px;top:560px;width:310px"><b>look_later</b><small>download a fresh cloud-free Sentinel-2 composite of only this cell, weeks later: debris persists, wet soil and green-up fade</small></div>
+
+<div class="box end" style="left:1430px;top:120px;width:320px"><b>confirm</b><small>multi-sensor agreement; counts toward the report</small></div>
+<div class="box human" style="left:1430px;top:250px;width:320px"><b>ask_human</b><small>chip, measurements and the agent's reason go to the analyst queue</small></div>
+<div class="box human" style="left:1430px;top:390px;width:320px"><b>flag</b><small>change reverted: likely seasonal. Still a person's call</small></div>
+<div class="box human" style="left:1430px;top:560px;width:320px"><b>Analyst</b><small>keeps or removes each queued cell; only a removal changes the map (pipeline re-runs with a veto). The report is anchored only when the queue is empty.</small></div>
+
+<div class="box obs" style="left:48px;top:800px;width:1702px"><b>Guard rails and observability</b>
+<small>At most 4 tool calls per cell and a download budget per run · each tool once per cell · the agent never removes anything · an LLM planner cannot confirm below the evidence bar (enforced in code, not in the prompt) · every step is kept as a trace in inspection.json and shown in the dashboard · every decision is a CloudWatch metric (Embedded Metric Format: verdict, tool calls, seconds per cell)</small></div>
+
+<svg width="1800" height="1000">
+  <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#8aa0bd"/></marker>
+    <marker id="b" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+    <path d="M0,0 L10,5 L0,10 z" fill="#5ac8fa"/></marker></defs>
+  <g stroke="#8aa0bd" stroke-width="2.2" fill="none" marker-end="url(#a)">
+    <path d="M348,180 L396,180"/>
+    <path d="M890,250 L936,250"/>
+    <path d="M1370,165 L1426,165"/>
+    <path d="M1370,300 L1426,300"/>
+    <path d="M1370,420 L1426,440"/>
+    <path d="M1750,305 L1778,305 L1778,630 L1754,630"/>
+    <path d="M1750,445 L1778,445"/>
+  </g>
+  <g stroke="#5ac8fa" stroke-width="2.2" fill="none" marker-end="url(#b)">
+    <path d="M1120,432 C1120,535 560,525 555,556"/>
+    <path d="M1140,432 C1140,535 895,525 895,556"/>
+    <path d="M1160,432 C1170,530 1235,530 1235,556"/>
+  </g>
+  <g stroke="#5ac8fa" stroke-width="2.2" fill="none" stroke-dasharray="7 6" marker-end="url(#b)">
+    <path d="M400,640 C320,640 320,470 396,440"/>
+  </g>
+</svg>
+<div class="lbl" style="left:620px;top:512px">act: call one tool</div>
+<div class="lbl" style="left:200px;top:540px">result →<br>perceive again</div>
