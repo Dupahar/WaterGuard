@@ -6,7 +6,7 @@
 
 Point at a map, pick a date, and WaterGuard tells rescue teams **where the flood hit, what it broke, and who is now cut off**, using nothing but free satellite data.
 
-[![Watch the film](https://img.shields.io/badge/▶_Watch_the_film-YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/4vqE-tZAP90)
+[![Watch the film](https://img.shields.io/badge/▶_Watch_the_film-YouTube-FF0000?style=for-the-badge&logo=youtube&logoColor=white)](https://youtu.be/Af2apa_KtR4)
 [![Live demo](https://img.shields.io/badge/🌍_Try_it_live-on_AWS-FF9900?style=for-the-badge&logo=amazonwebservices&logoColor=white)](https://d1sgb39rsg0dlm.cloudfront.net)
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
@@ -20,7 +20,7 @@ Point at a map, pick a date, and WaterGuard tells rescue teams **where the flood
 ![OpenStreetMap](https://img.shields.io/badge/OpenStreetMap-7EBC6F?logo=openstreetmap&logoColor=white)
 ![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
 
-<a href="https://youtu.be/4vqE-tZAP90"><img src="https://img.youtube.com/vi/4vqE-tZAP90/maxresdefault.jpg" alt="WaterGuard film on YouTube" width="720"></a>
+<a href="https://youtu.be/Af2apa_KtR4"><img src="https://img.youtube.com/vi/Af2apa_KtR4/maxresdefault.jpg" alt="WaterGuard film on YouTube" width="720"></a>
 
 *▶ Click to watch the film*
 
