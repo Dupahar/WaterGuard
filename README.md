@@ -14,6 +14,8 @@ Point at a map, pick a date, and WaterGuard tells rescue teams **where the flood
 ![OpenCV](https://img.shields.io/badge/OpenCV-5C3EE8?logo=opencv&logoColor=white)
 ![MapLibre](https://img.shields.io/badge/MapLibre_GL-396CB2?logo=maplibre&logoColor=white)
 ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white)
+![NVIDIA Nemotron](https://img.shields.io/badge/NVIDIA_Nemotron-76B900?logo=nvidia&logoColor=white)
+![Nebius Token Factory](https://img.shields.io/badge/Nebius_Token_Factory-0B0D11)
 ![Amazon Bedrock](https://img.shields.io/badge/Amazon_Bedrock-FF9900?logo=amazonwebservices&logoColor=white)
 ![Sentinel-1](https://img.shields.io/badge/Sentinel--1-radar-0B3D91)
 ![Sentinel-2](https://img.shields.io/badge/Sentinel--2-optical-2E8B57)
@@ -97,11 +99,12 @@ python -m waterguard.pipeline --bbox 85.313 28.139 85.358 28.198 --date 2026-08-
 
 Everything lands in `data/runs/<run_id>/`: `facts.json` (every number, with where it came from), `impact.tif`, and GeoJSON layers for impact, buildings, bridges, roads cut, settlements and health facilities.
 
-**Copilot brain** (optional; with none configured, a deterministic offline router answers from the same tools):
+**Copilot and planner models** (optional; with none configured, a deterministic offline router answers from the same tools and the inspector uses its rule planner). Web reports in the copilot need `TAVILY_API_KEY`.
 
 | Backend | Set in `.env` |
 |---|---|
-| Amazon Bedrock (default: Amazon Nova Pro) | AWS credentials, `WATERGUARD_LLM=bedrock`, optional `BEDROCK_MODEL` |
+| NVIDIA Nemotron on Nebius Token Factory (default when the key is set; see below) | `NEBIUS_API_KEY`, optional `NEBIUS_MODEL`, `NEBIUS_PLANNER_MODEL`, `NEBIUS_VL_MODEL` |
+| Amazon Bedrock (Amazon Nova Pro; also the fallback) | AWS credentials, `WATERGUARD_LLM=bedrock`, optional `BEDROCK_MODEL` |
 | Any OpenAI-compatible API | `OPENAI_API_KEY`, `OPENAI_BASE_URL`, `OPENAI_MODEL` |
 | Offline | `WATERGUARD_LLM=offline` |
 
@@ -258,6 +261,30 @@ for each 600 m cell of the impact map (ranked by buildings hit, roads cut, peopl
 ```bash
 python -m waterguard.inspector <run_id> [--planner rules|llm]     # or the dashboard's Inspect tab
 python -m pytest tests/test_vision.py -q                          # co-registration, realign, flow, guard rails
+```
+
+## 🟩 NVIDIA Nemotron on Nebius Token Factory
+
+The agent's judgement and the copilot run on three NVIDIA Nemotron models served by **Nebius Token Factory**, through its OpenAI-compatible API. Amazon Bedrock only takes over if Token Factory is unreachable. The live demo runs this way.
+
+| Role | Model | What it does | What the code does not let it do |
+|---|---|---|---|
+| Planner (`--planner llm`) | `nvidia/Nemotron-3-Ultra-550b-a55b` | picks the next step from the OpenCV measurements: realign, zoom, look later, second look, ask a human | confirm below the evidence bar, reuse a tool, take more than 4 steps, remove anything; overrules are counted |
+| Second look | `nvidia/Nemotron-3.5-Super-VL` | reads the analyst chip (before / after / colour change) and answers `{cause, confidence, explanation}` via structured JSON output | confirm anything; it can only flag a likely false alarm (≥ 70 % confident, no colour evidence) or annotate the review card |
+| Copilot | `nvidia/nemotron-3-super-120b-a12b` | answers in English or Nepali from read-only tools over the run, and from web reports when asked about news | quote a number no map tool returned (a verifier checks every one); mix web numbers into map numbers |
+
+**One real trace** (held-out Bidur cell `r840c660`, `video/scripts/export_nemotron.py`). Nemotron Ultra saw vegetation and radar change but no colour or structure change, and asked for a second look. Nemotron VL read the chip as *flood debris or scour, 90 %*: light grey sediment where there was vegetated ground. Ultra then wanted to confirm, and the guard rail overruled it because only 2 of 4 evidence lines agree, so the cell went to a person. Ultra had also called a colour contrast of 6.6 "strong colour change", while the line is set at 12. That is why the bar lives in code, not in the prompt.
+
+**Copilot on Nemotron 3 Super** (`scripts/eval_copilot.py`, 15 questions in English and Nepali, two about news): **15 / 15 answers fully verified**, 158 numbers checked, 0 retries, median 4.3 s (`docs/copilot_eval_nemotron.json`). Asked about deaths without web reports, it says the maps hold no casualty data.
+
+What Token Factory made easy: one OpenAI-compatible endpoint for a 550B reasoning planner, a vision-language model and a fast tool-calling copilot, with tool calling and `json_schema` structured output, so swapping models is a one-line change (`NEBIUS_MODEL`, `NEBIUS_PLANNER_MODEL`, `NEBIUS_VL_MODEL`). What took work: the vision model reasons before it answers, so with a small `max_tokens` replies were cut off or the JSON was malformed. A larger budget plus structured output made every read valid.
+
+```bash
+# .env: NEBIUS_API_KEY=... (and optionally TAVILY_API_KEY for web reports)
+python -m waterguard.inspector <run_id>                    # rules + Nemotron VL second look
+python -m waterguard.inspector <run_id> --planner llm      # Nemotron Ultra plans, guard rails in code
+python scripts/eval_copilot.py --run <run_id> --out docs/copilot_eval_nemotron.json
+python -m waterguard.validate --planners rules rules+vl llm+vl    # compare, on the cells scored against EMS
 ```
 
 ## 🔐 Reports anyone can check, relief that moves on evidence
