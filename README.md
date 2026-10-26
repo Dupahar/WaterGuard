@@ -222,6 +222,19 @@ for each 600 m cell of the impact map (ranked by buildings hit, roads cut, peopl
 
   Misregistration doesn't fool the agent, because every measure is a contrast against nearby unflagged ground that shifted too. What it does is blind it: without realign, a 3 px shift sends 108 of 113 cells to the analyst. Realign (SIFT + MAGSAC++) locks on in 84 of them and the agent keeps working.
 
+- 🔬 **One cell, step by step.** A held-out cell in Bidur (`r840c660`, 24.9 ha flagged), with its after image shifted 3 px as in the stress test. The film's *How it looks* chapter replays this trace; `video/scripts/export_cv.py` reproduces it:
+
+  | Step | What the agent saw or did |
+  |---|---|
+  | perceive | ECC can't lock on; 2.6 px of shift left over unflagged ground; 2 of 4 evidence lines |
+  | decide → realign | "before and after do not line up" |
+  | act: realign | 1,348 / 957 SIFT keypoints → 49 ratio-test matches → MAGSAC++ keeps 12 (the other 37 sit on ground that changed); 3.59 px recovered, 0.27 px residual; now 3 of 4 lines |
+  | decide → zoom | "colour missing: measure the four 300 m quadrants separately" |
+  | act: zoom | NE and SE: all 4 lines agree, 65 % of the flagged ground |
+  | decide → **confirm** | the same cell with ECC alone goes to an analyst |
+
+- 🌍 **On the live demo**, open a result and the **Inspect** tab: every cell shows its trace and the chips the agent looked at, including the realigned ones.
+
 ```bash
 python -m waterguard.inspector <run_id> [--planner rules|llm]     # or the dashboard's Inspect tab
 python -m pytest tests/test_vision.py -q                          # co-registration, realign, flow, guard rails
@@ -269,6 +282,20 @@ What a fingerprint does **not** prove: that the satellite analysis is right. It 
 
 **Never used as inputs:** Copernicus EMS, UNOSAT or any other damage maps, or OSM edits made after the event. Every run's OSM snapshot is taken 24 h before the event and audited, and the run fails if any feature was edited later. EMS maps are read **only** by `waterguard/validate.py`, which the pipeline never imports. No training dataset is used. Population is estimated as buildings × 4.37 (Nepal 2021 census average household size), and that assumption is stated wherever the number appears. Dashboard basemaps (Esri) are for display only.
 
+## 🎬 The film
+
+The walkthrough film is made in code ([Remotion](https://www.remotion.dev/), `video/`): every frame is React drawn over real WaterGuard output. That means captured dashboard states, the run's own numbers and ledger transactions, and, in *How it looks*, the actual SIFT matches, MAGSAC++ inliers, re-aligned image and quadrant read-out of one inspected cell. Each visual is cued to a word of the narration.
+
+```bash
+cd video && npm install
+python scripts/export_product.py ; python scripts/export_cv.py      # real numbers, chips and matches -> public/data/
+python scripts/el_tts.py 13 14                                     # narration blocks (docs/video/product_vo.txt), ElevenLabs; needs ELEVENLABS_API_KEY
+python scripts/el_import.py                                        # loudness-match the takes
+VO_SRC=public/audio/vo_el VO_PAUSE=0.45 python scripts/product_timeline.py   # word timings (needs faster-whisper)
+python scripts/product_mix.py                                      # music + voice mix (needs scipy)
+npx remotion render src/index.ts Product out/waterguard_product.mp4
+```
+
 ## 🙏 Attribution
 
 - Contains modified Copernicus Sentinel data 2026.
@@ -277,6 +304,7 @@ What a fingerprint does **not** prove: that the satellite analysis is right. It 
 - Validation only: European Union, Copernicus Emergency Management Service data (EMSR927).
 - Data access: Microsoft Planetary Computer; ohsome API (HeiGIT); Meru Labs API (fallback).
 - WhiteboxTools (Lindsay, 2016), OpenCV, MapLibre GL JS.
+- Film: music from Mixkit (free licence); narration voiced with ElevenLabs.
 
 ## 📜 License
 

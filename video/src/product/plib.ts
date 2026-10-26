@@ -5,19 +5,20 @@ import timeline from './timeline.json';
 export const PEND = timeline.end;
 type Scene = {n: number; start: number; dur: number; words: [number, number, string][]};
 const scenes = timeline.scenes as Scene[];
-export const sStart = (n: number) => scenes[n - 1].start;
-export const sEnd = (n: number) => scenes[n - 1].start + scenes[n - 1].dur;
+const sc = (n: number) => scenes.find((s) => s.n === n)!;   // blocks are not played in number order (13, 14 follow 8)
+export const sStart = (n: number) => sc(n).start;
+export const sEnd = (n: number) => sc(n).start + sc(n).dur;
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 /** time (s) when narration block n says `word` (nth occurrence) */
 export const at = (n: number, word: string, nth = 0): number => {
-	const hits = scenes[n - 1].words.filter((w) => norm(w[2]) === norm(word));
+	const hits = sc(n).words.filter((w) => norm(w[2]) === norm(word));
 	const w = hits[nth] ?? hits[hits.length - 1];
 	if (!w) throw new Error(`cue ${n} ${word}`);
 	return w[0];
 };
 /** end time of that word */
 export const atEnd = (n: number, word: string, nth = 0): number => {
-	const hits = scenes[n - 1].words.filter((w) => norm(w[2]) === norm(word));
+	const hits = sc(n).words.filter((w) => norm(w[2]) === norm(word));
 	return (hits[nth] ?? hits[hits.length - 1])[1];
 };
 
@@ -34,9 +35,18 @@ export type PData = {
 	ledger: any;
 	ui: {w: number; h: number; dpr: number; states: Record<string, {boxes: Record<string, Box | null>}>};
 };
+/** one real inspector cell under a 3 px misregistration (scripts/export_cv.py) */
+export type Cv = {
+	area: string; cell: string; window: [number, number]; cell_box: [number, number, number, number]; keypoints: [number, number];
+	matches: [number, number, number, number, number][]; realign: {dx: number; dy: number; inliers: number; matches: number; residual_px: number};
+	impact_ha: number; buildings_hit: number; verdict: string; ecc_only_verdict: string;
+	zoom: {part: string; impact_ha: number; lines: Record<string, boolean>}[]; strong_parts: string[]; strong_share: number;
+	trace: {step: string; tool?: string; lines?: Record<string, boolean>}[];
+	robustness: {shift_px: number; variant: string; cells: number; confirmed_cells: number; false_confirmations: number; real_damage_ha_auto_confirmed_pct: number; realigned_cells: number}[];
+};
 export type Cor = {ext: [number, number, number, number]; path: [number, number][]; places: {name: string; c: [number, number]}[]};
 
-type D = {p: PData; cor: Cor};
+type D = {p: PData; cor: Cor; cv: Cv};
 let cache: D | null = null;
 let pending: Promise<D> | null = null;
 /** load once per bundle; delayRender keeps the frame from rendering before the data is there */
@@ -47,8 +57,9 @@ export const loadData = (): Promise<D> => {
 		pending = Promise.all([
 			fetch(staticFile('data/product.json')).then((r) => r.json()),
 			fetch(staticFile('data/corridor.json')).then((r) => r.json()),
-		]).then(([p, cor]) => {
-			cache = {p, cor};
+			fetch(staticFile('data/cv/cell.json')).then((r) => r.json()),
+		]).then(([p, cor, cv]) => {
+			cache = {p, cor, cv};
 			continueRender(h);
 			return cache;
 		});
