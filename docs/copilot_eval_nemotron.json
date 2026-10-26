@@ -1,0 +1,236 @@
+{
+ "summary": {
+  "questions": 15,
+  "answers_fully_verified": 15,
+  "needed_retry": 0,
+  "numbers_total": 158,
+  "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+  "median_seconds": 4.3
+ },
+ "items": [
+  {
+   "q": "Which villages are cut off?",
+   "answer": "Cut‑off settlements (fully isolated):\n\n- **Unnamed cluster** – 36 buildings → ≈ 157 people  \n- **Unnamed cluster** – 33 buildings → ≈ 144 people  \n\n(These figures come directly from the `list_cut_off` tool.)",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "list_cut_off"
+   ],
+   "numbers": 4,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 5.3
+  },
+  {
+   "q": "How many people are cut off and how did you estimate it?",
+   "answer": "The satellite‑based analysis estimates **301 people** are completely cut off by road loss.  \n\nEstimation method: building count × 4.37 persons per household (the Nepal Census 2021 average household size). This figure comes directly from the `list_cut_off` tool’s field `estimated_people_cut_off_by_road` and its accompanying `people_estimate_method`.",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "list_cut_off"
+   ],
+   "numbers": 3,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 4.7
+  },
+  {
+   "q": "Which bridges are likely damaged? Give coordinates.",
+   "answer": "Likely damaged bridges (coordinates from satellite analysis):\n\n- Bridge near Pajung (1.6 km): lon 85.34352, lat 28.18258  \n- Bridge near Syabru Bensi (0.8 km): lon 85.33252, lat 28.15739  \n- Bridge near Pajung (1.6 km): lon 85.34354, lat 28.18231  \n- Bridge near Syabru Bensi (0.6 km): lon 85.34273, lat 28.16587  \n- Bridge near Pajung (1.5 km): lon 85.34220, lat 28.18160  \n- Bridge near Syabru Bensi (0.3 km): lon 85.33998, lat 28.16423  \n- Bridge near Brabal (2.2 km): lon 85.31769, lat 28.14741  \n- Bridge near Syabru Bensi (0.6 km): lon 85.34373, lat 28.16350  \n\nAll are rated “likely damaged” based on satellite change detection.",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "damaged_bridges"
+   ],
+   "numbers": 24,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 4.3
+  },
+  {
+   "q": "What is the status of Syabru Bensi?",
+   "answer": "**Syabru Bensi – settlement status**\n\n- **Buildings:** 404  \n- **Estimated population:** 1,765 (based on buildings × avg. household size)  \n- **Vehicle access:** *Partly cut* – about 64 % of vehicles stranded/lost connectivity  \n- **Foot access:** *Partly cut* – lost connection to health facilities  \n- **Road‑link loss:** 64 % of buildings have no road left  \n\n*Note: These figures come from satellite‑derived analysis; vehicle/foot status indicates inferred disruption, not ground‑confirmed damage.*",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "find_settlement"
+   ],
+   "numbers": 4,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 4.1
+  },
+  {
+   "q": "Is any health facility affected?",
+   "answer": "No health facility in the analyzed area is shown as affected by the satellite data. The health‑facility check returned “total_in_area”: 1, “affected”: [] – meaning none of the facilities lie within the impact zone.",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "health_facilities"
+   ],
+   "numbers": 1,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 3.3
+  },
+  {
+   "q": "How much road is inside the impact zone?",
+   "answer": "The impact zone contains **11.11 km** of road. This figure comes directly from the satellite‑based overview analysis.",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "get_overview"
+   ],
+   "numbers": 1,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 3.3
+  },
+  {
+   "q": "Write a 5-line situation report for the district emergency operations centre.",
+   "answer": "- Impact area ≈ 172.9 ha (173.5 ha impact ha) covering 29.8 km², detected from Sentinel‑1/2 images on 2026‑08‑27 – 2026‑10‑03.  \n- Buildings likely affected: 225 (estimated 983 people); possibly affected: 40.  \n- Bridges likely damaged: 8 out of 11 total; none possibly damaged.  \n- Settlements cut off for vehicle access: 2 (≈ 301 people estimated); partly cut off: 1.  \n- Health facilities: 1 total, none affected; road length in impact zone ≈ 11.11 km of 89.8 km total.",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "get_overview"
+   ],
+   "numbers": 22,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 4.1
+  },
+  {
+   "q": "Which satellite images was this based on?",
+   "answer": "The analysis used Sentinel‑1 radar images from 2026‑08‑28 12:21 UTC and 2026‑09‑05 00:18 UTC, plus Sentinel‑2 optical images dated 2026‑08‑27, 2026‑09‑01, 2026‑09‑06, 2026‑09‑21, 2026‑10‑01, and 2026‑10‑03, together with an OpenStreetMap snapshot taken on 2026‑08‑24 22:00 UTC.",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "get_overview"
+   ],
+   "numbers": 35,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 3.5
+  },
+  {
+   "q": "How many people died?",
+   "answer": "I don’t have any information on fatalities from the satellite‑based analysis. The tools I can use only provide data on impacted areas, infrastructure, settlements, bridges, health facilities, etc., and do not include casualty figures. If you need reported death tolls, you would need to consult official sources or news reports, which are outside the scope of the map data I have access to.",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [],
+   "numbers": 0,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 1.8
+  },
+  {
+   "q": "कुन कुन गाउँ सम्पर्कविहीन छन्?",
+   "answer": "सम्पर्कविहीन (सडकबाट पूर्ण रूपमा कटेका) स्थानहरू:\n\n- अनाम क्लस्टर (३६ भवन)  \n  - अनुमानित जनसंख्या: १५७  \n  - भवनहरू: ३६  \n  - स्थिति: सडकबाट निकास गुमाएको  \n\n- अनाम क्लस्टर (३३ भवन)  \n  - अनुमानित जनसंख्या: १४४  \n  - भवनहरू: ३३  \n  - स्थिति: सडकबाट निकास गुमाएको  \n\n(स्रोत: list_cut_off टूल)",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "list_cut_off",
+    "list_calls\n{\n\"name\": \"list_cut_off\",\n\"arguments\": {\"include_partly\": false}\n}\n</tool_call>\n</result",
+    "list_cut_off",
+    "list_cut_off"
+   ],
+   "numbers": 6,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 9.0
+  },
+  {
+   "q": "कति वटा पुल भत्किए?",
+   "answer": "आठ वटा पुल संभाव्य रूप से क्षतिग्रस्त देखिएका छन्।",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "damaged_bridges"
+   ],
+   "numbers": 0,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 3.4
+  },
+  {
+   "q": "स्याब्रुबेसीको अवस्था के छ?",
+   "answer": "स्याब्रुबेसी (Syabru Besi) को अवस्था:\n\n- भवनहरू: ४०४  \n- अनुमानित जनसंख्या: १,७६५  \n- सडक पहुँच: वाहन parcialmente कट (vehicle_status = “partly cut”)  \n- पैदल पहुँच: पगडण्डी parcialmente कट (foot_status = “partly cut”), स्वास्थ्य केन्द्रसँगको जोडन गुमाएको (foot_lost = “health”)  \n- सडक बिनाको भवनको प्रतिशत: ६४% (percent_of_buildings_with_no_road_left)  \n\nअर्थात, ठाउँको कुनै भागहरूलाई सडकबाट पूर्ण रूपमा कट गयो भएको छ र स्वास्थ्य सुविधा सम्मको पैदल पहुँच पनि प्रभावित भएको छ। (स्रोत: मानचित्र विश्लेषण)",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "find_settlement"
+   ],
+   "numbers": 3,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 4.5
+  },
+  {
+   "q": "जिल्ला आपतकालीन कार्य सञ्चालन केन्द्रका लागि छोटो स्थिति प्रतिवेदन लेख्नुहोस्।",
+   "answer": "**छोटो स्थिति प्रतिवेदन – जिल्ला आपतकालीन कार्य सञ्चालन केन्द्र**\n\n- प्रभावित क्षेत्र: **172.9 हेक्टेयर** (कुल 29.8 कि.मी²)  \n- घटना समय (UTC): **2026‑08‑25 22:00**  \n- भवन: कुल **1,269**, सम्भावित रूप से प्रभावित **225**, सम्भावित रूप से संभावित रूप से प्रभावित **40**  \n- प्रभावित भवनमा अनुमानित जनसंख्या: **983**  \n- पुल: कुल **11**, सम्भावित रूप से क्षतिग्रस्त **8**, सम्भावित रूप से संभावित रूप से क्षतिग्रस्त **0**  \n- स्वास्थ्य सुविधा: कुल **1**, प्रभावित **0**  \n- सडक: कुल लम्बाई **89.8 कि.मी**, प्रभावित भाग **11.11 कि.मी**  \n- बन्द बस्ती (वाहन पहुँच शून्य): **2** बस्ती, अनुमानित जनसंख्या **301**  \n- आंशिक रूप से बन्द बस्ती (वाहन पहुँच सीमित): **1** बस्ती  \n- पैदल मार्ग बन्द बस्ती: **2** बस्ती, अनुमानित जनसंख्या **301**  \n- वाहन द्वारा फँसलेका लोगोंको अनुमान: **1,452**  \n\nउपयोगित उपग्रह चित्र: Sentinel‑1 (पश्चात् 2026‑08‑28, 2026‑09‑05), Sentinel‑2 (2026‑08‑27, 2026‑09‑01, 2026‑09‑06, 2026‑09‑21, 2026‑10‑01, 2026‑10‑03), OSM स्नैपशॉट 2026‑08‑24।  \n\n*सभी संख्याएँ उपग्रह विश्लेषण टूलबाट लिएको छ; अनुमानित जनसंख्या भवन × 4.37 व्यक्ति/परिवार (नेपाल जनगणना 2021) आधारित छ।*",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "get_overview"
+   ],
+   "numbers": 55,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [],
+   "retried": false,
+   "seconds": 6.2
+  },
+  {
+   "q": "What do news reports say about rescue and relief operations here?",
+   "answer": "**Rescue & relief – news reports (not verified by WaterGuard):**  \n\n- **E‑TV Bharat:** “Emergency council meeting mobilised all state resources; Nepali Army and private helicopters on standby, flying injured to Kathmandu hospitals.” 【etvbharat.com】  \n- **Zeenews India:** Authorities said they would work with China on relief and rescue after the flash flood hit Syabru Bensi. 【zeenews.india.com】  \n- **BBC:** Nepal Army spokesman said efforts underway to rescue 115 people from Mailung; Ministry warned of huge loss of life in Timure, Syabrubesi and Betrawati. 【bbc.co.uk】  \n- **LinkedIn post:** Nepal Red Cross shifted from rescue to large‑scale relief; ~1,200 people displaced from at least three villages. 【linkedin.com】  \n\n*These are media reports; WaterGuard has not cross‑checked them with satellite data.*",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "web_reports"
+   ],
+   "numbers": 0,
+   "unverified_final": [],
+   "web_numbers": [
+    "115",
+    "1200"
+   ],
+   "sources": [
+    "https://www.etvbharat.com/en/international/hotelier-searches-for-his-wife-and-son-after-nepal-floods-enn26082603301",
+    "https://zeenews.india.com/world/questions-over-cause-of-nepal-flash-flood-what-is-known-so-far-3068703.html",
+    "https://www.thetimes.com/world/asia/article/nepal-floods-latest-news-9rqfbjh7h",
+    "https://www.bbc.co.uk/news/articles/cx2zyerv2lmo",
+    "https://www.linkedin.com/posts/stuart-dunning-landslides_the-scale-of-the-disaster-in-nepal-is-hard-activity-7499152932437745664-XFJ4",
+    "https://www.etvbharat.com/en/international/nepal-floods-glacier-collapse-rescue-day-2-aug-27-enn26082702454"
+   ],
+   "retried": false,
+   "seconds": 9.7
+  },
+  {
+   "q": "Has the main road through Syabru Bensi been reopened, according to reports?",
+   "answer": "According to the recent web‑search results, there is no explicit mention that the main road through Syabru Bensi has been reopened. The reports discuss road repairs elsewhere (e.g., near Gyirong Port in Tibet) and general rescue operations in the region, but they do not confirm the status of the Syabru Bensi road itself.  \n\n*Reported by web search (Tavily/news): not verified by WaterGuard.*",
+   "backend": "nebius: nvidia/nemotron-3-super-120b-a12b",
+   "tools": [
+    "web_reports"
+   ],
+   "numbers": 0,
+   "unverified_final": [],
+   "web_numbers": [],
+   "sources": [
+    "https://www.reuters.com/world/china/china-restores-road-access-tibet-disaster-zone-search-intensifies-2026-09-02/",
+    "https://www.cnn.com/2026/09/01/world/video/cnn-goes-inside-rescue-operations-in-worst-hit-area-of-nepal-digvid-vrtc-hnk"
+   ],
+   "retried": false,
+   "seconds": 9.8
+  }
+ ]
+}

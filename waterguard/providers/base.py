@@ -42,7 +42,7 @@ class ScenePair:
 def as_utc(d) -> datetime:
     if isinstance(d, str):
         d = datetime.fromisoformat(d.replace("Z", "+00:00"))
-    return d if d.tzinfo else d.replace(tzinfo=timezone.utc)
+    return d.astimezone(timezone.utc) if d.tzinfo else d.replace(tzinfo=timezone.utc)
 
 
 def select_pairs(scenes: list[Scene], event: datetime, max_post_days=12) -> list[ScenePair]:

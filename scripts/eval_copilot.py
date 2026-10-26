@@ -1,8 +1,9 @@
 """Evaluate the copilot on a fixed question set (English + Nepali) for one run.
 
     python scripts/eval_copilot.py --run e34c30aded            # uses the configured LLM backend
+    WATERGUARD_LLM=nebius python scripts/eval_copilot.py --run e34c30aded --out docs/copilot_eval_nemotron.json
 Reports, per question: tools called, numbers in the answer, numbers the verifier rejected, whether
-a retry was needed. Writes docs/copilot_eval.json.
+a retry was needed, numbers taken from web reports, and seconds. Writes --out (default docs/copilot_eval.json).
 """
 import argparse
 import json
@@ -28,25 +29,34 @@ QUESTIONS = [
     "स्याब्रुबेसीको अवस्था के छ?",
     "जिल्ला आपतकालीन कार्य सञ्चालन केन्द्रका लागि छोटो स्थिति प्रतिवेदन लेख्नुहोस्।",
 ]
+# asked only when web reports are configured (TAVILY_API_KEY): answers must keep web facts apart from map facts
+QUESTIONS_WEB = [
+    "What do news reports say about rescue and relief operations here?",
+    "Has the main road through Syabru Bensi been reopened, according to reports?",
+]
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--run", required=True)
+    ap.add_argument("--out", default="docs/copilot_eval.json")
     a = ap.parse_args()
     out = []
-    for q in QUESTIONS:
+    from waterguard import web
+    for q in QUESTIONS + (QUESTIONS_WEB if web.available() else []):
         t = time.time()
         r = copilot.ask(a.run, q)
         out.append({"q": q, "answer": r["answer"], "backend": r["backend"], "tools": r["tool_calls"],
                     "numbers": r["numbers_checked"], "unverified_final": r["unverified"],
+                    "web_numbers": r.get("web_numbers", []), "sources": [x["url"] for x in r.get("sources", [])],
                     "retried": r.get("retried", False), "seconds": round(time.time() - t, 1)})
         print(json.dumps(out[-1], ensure_ascii=False))
     s = {"questions": len(out), "answers_fully_verified": sum(not o["unverified_final"] for o in out),
-         "needed_retry": sum(o["retried"] for o in out), "numbers_total": sum(o["numbers"] for o in out)}
+         "needed_retry": sum(o["retried"] for o in out), "numbers_total": sum(o["numbers"] for o in out),
+         "backend": out[0]["backend"] if out else None, "median_seconds": sorted(o["seconds"] for o in out)[len(out) // 2]}
     print(s)
-    Path("docs").mkdir(exist_ok=True)
-    Path("docs/copilot_eval.json").write_text(json.dumps({"summary": s, "items": out}, ensure_ascii=False, indent=1),
+    Path(a.out).parent.mkdir(parents=True, exist_ok=True)
+    Path(a.out).write_text(json.dumps({"summary": s, "items": out}, ensure_ascii=False, indent=1),
                                               encoding="utf-8")
 
 

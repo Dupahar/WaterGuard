@@ -71,6 +71,8 @@ select { flex: 1; min-width: 0; }
 .msg.bot { background: var(--surface-1); border: 1px solid var(--line); }
 .msg .meta { display: block; margin-top: 6px; font-size: 11px; color: var(--text-muted); }
 .msg .meta.ok { color: #5cc95c; } .msg .meta.bad { color: var(--warning); }
+.msg .sources { display: block; margin-top: 6px; padding-top: 6px; border-top: 1px dashed var(--text-muted); font-size: 11px; color: var(--text-muted); }
+.msg .sources a { color: var(--text-muted); text-decoration: underline; }
 .suggest { display: flex; flex-wrap: wrap; gap: 4px; margin: 8px 0; }
 .suggest button { background: none; border: 1px solid var(--line); border-radius: 999px; padding: 4px 10px; font-size: 12px; color: var(--text-secondary); }
 #askForm { display: flex; gap: 6px; }

@@ -252,6 +252,50 @@ def robustness_check(shifts=(0.0, 1.5, 3.0, 5.0)) -> dict:
     return out
 
 
+def planner_check(variants=("rules", "rules+vl", "llm+vl")) -> dict:
+    """Who should decide, and does a second look help? The scored cells of the last inspection_check()
+    are settled again by each variant: 'rules' = the fixed rule planner; '+vl' = with the Nemotron
+    vision-language second look (second_look.py) before a cell goes to a person; 'llm' = Nemotron
+    on Nebius Token Factory picks every next tool (guard rails in code). No later looks, so no
+    downloads and only the decision-making differs. Chips go to the cache, run folders are untouched.
+    Beyond the usual scores: how the flags split between real damage and ground EMS did not map (a
+    flag sends a cell to a person as a likely false alarm), and how often the guard rails overruled
+    the model."""
+    import time
+    from . import inspector, vision
+    from .config import CACHE_DIR
+    runs = json.loads((ROOT / "docs" / "validation_inspector.json").read_text())["runs"]
+    out = {"method": " ".join(planner_check.__doc__.split()), "results": []}
+    for v in variants:
+        P = inspector.LLMPlanner() if v.startswith("llm") else inspector.RulePlanner()
+        look = "auto" if v.endswith("+vl") else None
+        rows, t0 = [], time.time()
+        for name, r in runs.items():
+            ev = vision.load(DATA_DIR / "runs" / r["run_id"])
+            cells = vision.cells(DATA_DIR / "runs" / r["run_id"], ev)
+            truth = _cell_truth(r["aoi"], r["run_id"], cells)
+            chips = CACHE_DIR / "planner_eval" / r["run_id"]
+            chips.mkdir(parents=True, exist_ok=True)
+            for c in [c for c in cells if c["id"] in truth]:
+                res = inspector.settle(ev, c, P, chips=chips, look=look)
+                sl = res["state"].get("second_look")
+                rows.append({"area": name, "split": _split(r["aoi"]), "real": truth[c["id"]], "ha": c["impact_ha"],
+                             "verdict": res["verdict"], "looked": sl is not None, "look_error": bool(sl and "error" in sl),
+                             "cause": sl.get("cause") if sl else None, "cell": c["id"], "reason": res["reason"]})
+        df = pd.DataFrame(rows)
+        for split, g in df.groupby("split"):
+            flags = g[g.verdict == "likely_false_alarm"]
+            out["results"].append({"variant": v, "split": split, **_verdict_scores(g),
+                                   "second_looks": int(g.looked.sum()), "second_look_errors": int(g.look_error.sum()),
+                                   "flagged_not_in_ems": int((~flags.real).sum()), "flagged_real_damage": int(flags.real.sum()),
+                                   "not_in_ems_cells": int((~g.real).sum())})
+        out["results"].append({"variant": v, "planner": P.name, "planner_stats": getattr(P, "stats", None),
+                               "seconds": round(time.time() - t0, 1),
+                               "second_look_causes": df.cause.value_counts().to_dict(),
+                               "cell_verdicts": df[["area", "cell", "real", "verdict", "cause", "reason"]].to_dict("records")})
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--aoi", nargs="+", type=int, default=[1, 2, 3, 5])
@@ -259,7 +303,15 @@ def main():
     ap.add_argument("--inspection", action="store_true", help="score the inspector agent (docs/validation_inspector.json)")
     ap.add_argument("--robustness", action="store_true",
                     help="misregistration stress test of the inspector (docs/validation_robustness.json)")
+    ap.add_argument("--planners", nargs="*", metavar="VARIANT",
+                    help="compare planners and the Nemotron second look: rules, rules+vl, llm, llm+vl "
+                         "(docs/validation_planners.json)")
     a = ap.parse_args()
+    if a.planners is not None:
+        r = planner_check(tuple(a.planners) or ("rules", "rules+vl", "llm+vl"))
+        (ROOT / "docs" / "validation_planners.json").write_text(json.dumps(r, indent=1, default=str))
+        print(json.dumps([{k: v for k, v in x.items() if k != "cell_verdicts"} for x in r["results"]], indent=1, default=str))
+        return
     if a.robustness:
         r = robustness_check()
         (ROOT / "docs" / "validation_robustness.json").write_text(json.dumps(r, indent=1))

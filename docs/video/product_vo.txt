@@ -1,4 +1,4 @@
-WaterGuard product film: narration (14 blocks; 13 and 14 play between 8 and 9, see ORDER in scripts/product_timeline.py). Guide read: Amazon Polly neural (scripts/product_vo.py).
+WaterGuard product film: narration (15 blocks; 13, 15 and 14 play between 8 and 9, see ORDER in scripts/product_timeline.py). Guide read: Amazon Polly neural (scripts/product_vo.py).
 Replace video/public/audio/vo_product/k1..k12.mp3 with your own reads and re-run scripts/product_timeline.py.
 
 BLOCK 1 (hook)
@@ -40,5 +40,8 @@ On areas it never saw, it matches the official European damage maps with F1 scor
 BLOCK 13 (how it looks)
 How does the agent look? With OpenCV 5. Here, the after image is three pixels off, so ECC registration cannot lock on. The agent re-aligns instead. SIFT finds forty-nine matching keypoints, and a MAGSAC fit keeps the twelve on ground that did not change. Three of four evidence lines now agree, so it zooms into each quarter of the cell. In two of them, all four agree. Confirmed.
 
-BLOCK 14 (tested, on AWS)
-We tested it the hard way. Shift every after image by three pixels, and with registration alone, the agent confirms just four percent of the real damage. With re-alignment, it confirms half, with not one false confirmation. It all runs on AWS: a Docker container on EC2 behind CloudFront, the copilot on Amazon Bedrock, and every agent decision becomes a metric in CloudWatch.
+BLOCK 14 (tested, where it runs)
+We tested it the hard way. Shift every after image by three pixels, and with registration alone, the agent confirms just four percent of the real damage. With re-alignment, it confirms half, with not one false confirmation. It runs as one container on AWS, its models on Nebius Token Factory, and every agent decision becomes a metric in CloudWatch.
+
+BLOCK 15 (Nemotron)
+Its judgement runs on NVIDIA Nemotron, through Nebius Token Factory. Nemotron Ultra plans each next step. Here it asks for a second look: Nemotron Super VL reads the same image an analyst would, and sees debris. Ultra wants to confirm, but only two evidence lines agree, so the guard rails in code overrule it, and a person decides. The copilot runs on Nemotron Super: fifteen of fifteen answers checked against the maps, with news from the web kept apart.

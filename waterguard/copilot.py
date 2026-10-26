@@ -10,6 +10,9 @@ How we enforce it:
      with the list of offending numbers; if it still fails, those numbers are masked and flagged.
   3. If no LLM is configured, a deterministic intent router answers from the same tools, so the
      copilot always works offline.
+  4. Web reports (web.py, optional) are a separate source: what news and agencies said after the
+     event. Facts from them are attributed to their site, and numbers found only there are reported
+     as "from web reports", never as checked against the maps.
 
 LLM backends (first available wins, or pick one with WATERGUARD_LLM):
   nebius   NVIDIA Nemotron on Nebius Token Factory (NEBIUS_API_KEY; NEBIUS_MODEL, NEBIUS_BASE_URL)
@@ -48,6 +51,13 @@ HARD RULES
 - If asked about something outside this area/event, or for medical/legal advice, say you only have the map results.
 - Never do arithmetic (no multiplying buildings by household size, no sums). Quote the tool's own totals.
 - Never use or mention Copernicus EMS / UNOSAT maps; you do not have them.
+
+WEB REPORTS (only if the web_reports tool is offered)
+- Use web_reports only for what the maps cannot know: news, roads reopened, relief operations, weather,
+  casualties or evacuations reported by authorities. Map questions are answered from the map tools.
+- Put web facts in a separate line or section starting "Reported by <site>:" and say they are not verified by
+  WaterGuard. Never mix web numbers into map numbers, never combine or compare them arithmetically.
+- If web reports disagree with the maps, give both and say which is which.
 """
 
 
@@ -159,6 +169,14 @@ class RunTools:
                        "them; relief funds can then pay against them automatically.",
         })
 
+    def web_reports(self, query: str) -> dict:
+        """News and agency reports after the event (web.py). A separate, unverified source."""
+        from . import web
+        S = self.settlements
+        named = S[S["name"].notna() & (S["name"].astype(str).str.len() > 0)].sort_values("buildings", ascending=False)
+        hint = " ".join(list(named["name"].astype(str).head(1)) + ["Nepal"])
+        return web.reports(query, self.facts["event_time_utc"], place_hint=hint)
+
     def trace_flood_path(self, lon: float, lat: float) -> dict:
         from .grid import Grid
         wd = Path(self.facts["terrain_workdir"])
@@ -198,6 +216,16 @@ TOOL_SPECS = [
     {"name": "trace_flood_path", "description": "Trace the flood path downstream from a point (lon, lat) on the elevation model and list settlements along it in order.",
      "parameters": {"type": "object", "properties": {"lon": {"type": "number"}, "lat": {"type": "number"}}, "required": ["lon", "lat"]}},
 ]
+WEB_SPEC = {"name": "web_reports", "description": "News and agency reports from the web published after the event "
+            "(roads reopened, relief operations, weather, casualties reported by authorities). NOT from the satellite maps "
+            "and not verified: attribute every fact to its site.",
+            "parameters": {"type": "object", "properties": {"query": {"type": "string", "description": "what to look for, in English"}},
+                           "required": ["query"]}}
+
+
+def tool_specs() -> list:
+    from . import web
+    return TOOL_SPECS + ([WEB_SPEC] if web.available() else [])
 
 
 # ---------------------------------------------------------------- number verifier
@@ -211,6 +239,7 @@ def _numbers(text: str) -> list[str]:
 
 def _evidence_numbers(results: list) -> set[str]:
     blob = json.dumps(results, ensure_ascii=False).translate(DEV)
+    blob = re.sub(r"(?<=\d),(?=\d{2,3}(?!\d))", "", blob)          # thousands separators: 2,678 and 1,20,000
     vals = set()
     for m in re.finditer(r"-?\d+(?:\.\d+)?", blob):
         s = m.group(0).lstrip("-")
@@ -239,9 +268,33 @@ def verify(answer: str, results: list) -> tuple[list[str], list[str]]:
     return nums, bad
 
 
+def verify_split(answer: str, results: list) -> tuple[list[str], list[str], list[str]]:
+    """(all numbers, unverified, from web reports only): a number counts as checked only if a map tool
+    returned it; one that appears only in web reports is attributed to them, not to the maps."""
+    on_map = [r for r in results if r.get("tool") != "web_reports"]
+    nums, bad = verify(answer, on_map)
+    web_ev = _evidence_numbers([r for r in results if r.get("tool") == "web_reports"])
+    from_web = [n for n in bad if n in web_ev or (n.rstrip("0").rstrip(".") if "." in n else n) in web_ev]
+    return nums, [n for n in bad if n not in from_web], from_web
+
+
+def _sources(results: list) -> list:
+    seen, out = set(), []
+    for r in results:
+        if r.get("tool") == "web_reports":
+            for x in (r.get("result") or {}).get("results", []):
+                if x["url"] not in seen:
+                    seen.add(x["url"])
+                    out.append({k: x[k] for k in ("title", "url", "site", "published")})
+    return out
+
+
 def _mask(answer: str, bad: list[str]) -> str:
     for b in sorted(set(bad), key=len, reverse=True):
-        for form in {b, b.translate(ASCII2DEV)}:
+        forms = {b, b.translate(ASCII2DEV)}
+        if b.isdigit() and len(b) > 3:                       # also as written with thousands separators
+            forms |= {f"{int(b):,}", f"{int(b):,}".translate(ASCII2DEV)}
+        for form in forms:
             answer = re.sub(rf"(?<![\d.]){re.escape(form)}(?![\d.])", "[unverified]", answer)
     return answer
 
@@ -280,9 +333,9 @@ def openai_client():
             os.getenv("OPENAI_MODEL", NEBIUS_MODEL))
 
 
-def _call_openai(messages, tools):
-    cli, model = openai_client()
-    r = cli.chat.completions.create(model=model, messages=messages, temperature=0.1,
+def _call_openai(messages, tools, model=None):
+    cli, default = openai_client()
+    r = cli.chat.completions.create(model=model or default, messages=messages, temperature=0.1,
                                     tools=[{"type": "function", "function": t} for t in tools])
     m = r.choices[0].message
     calls = [(c.id, c.function.name, json.loads(c.function.arguments or "{}")) for c in (m.tool_calls or [])]
@@ -349,7 +402,8 @@ def ask(run_id: str, question: str, history: list | None = None, point: dict | N
         ans = _offline(tools, question, results)
         nums, bad = verify(ans, results)
         return {"answer": ans, "backend": "offline (deterministic)", "numbers_checked": len(nums),
-                "unverified": bad, "actions": tools.actions, "tool_calls": [r["tool"] for r in results]}
+                "unverified": bad, "web_numbers": [], "sources": [], "actions": tools.actions,
+                "tool_calls": [r["tool"] for r in results]}
 
     sys_msg = SYSTEM + ("\nThe user clicked the map at lon %.5f, lat %.5f." % (point["lon"], point["lat"]) if point else "")
     messages = [{"role": "system", "content": sys_msg}]
@@ -357,11 +411,25 @@ def ask(run_id: str, question: str, history: list | None = None, point: dict | N
         messages.append({"role": h["role"], "content": h["text"]})
     lang = "Nepali (Devanagari script)" if _is_nepali(question) else "English"
     messages.append({"role": "user", "content": f"{question}\n\n[Reply in {lang}.]"})
-    call = _call_bedrock if backend == "bedrock" else _call_openai
+    primary = _call_bedrock if backend == "bedrock" else _call_openai
+    used = {"backend": backend}
+
+    def call(msgs, tools_):
+        """the configured model; if Nebius/OpenAI fails mid-answer, Bedrock (when AWS credentials exist) takes over"""
+        if used["backend"] == "bedrock (fallback)":
+            return _call_bedrock(msgs, tools_)
+        try:
+            return primary(msgs, tools_)
+        except Exception:
+            if backend == "bedrock" or os.getenv("WATERGUARD_FALLBACK", "bedrock") != "bedrock":
+                raise
+            used["backend"] = "bedrock (fallback)"
+            return _call_bedrock(msgs, tools_)
+    specs = tool_specs()
 
     def loop(msgs):
         for _ in range(6):
-            text, calls, raw = call(msgs, TOOL_SPECS)
+            text, calls, raw = call(msgs, specs)
             if not calls:
                 return text
             msgs.append({"role": "assistant", "content": text or None,
@@ -369,7 +437,7 @@ def ask(run_id: str, question: str, history: list | None = None, point: dict | N
                                          "function": {"name": n, "arguments": json.dumps(a)}} for cid, n, a in calls]})
             for cid, n, a in calls:
                 try:
-                    res = getattr(tools, n)(**a) if n in {t["name"] for t in TOOL_SPECS} else {"error": "unknown tool"}
+                    res = getattr(tools, n)(**a) if n in {t["name"] for t in specs} else {"error": "unknown tool"}
                 except Exception as e:
                     res = {"error": str(e)}
                 results.append({"tool": n, "args": a, "result": res})
@@ -377,7 +445,7 @@ def ask(run_id: str, question: str, history: list | None = None, point: dict | N
         return text
 
     answer = _strip(loop(messages))
-    nums, bad = verify(answer, results + [{"q": question}])
+    nums, bad, from_web = verify_split(answer, results + [{"q": question}])
     retried = False
     if bad:
         retried = True
@@ -386,8 +454,11 @@ def ask(run_id: str, question: str, history: list | None = None, point: dict | N
                          f"VERIFIER: these numbers are not in any tool result: {', '.join(bad)}. Rewrite the answer "
                          "using only numbers copied from tool results (call tools if needed). Same language."})
         answer = _strip(loop(messages))
-        nums, bad = verify(answer, results + [{"q": question}])
+        nums, bad, from_web = verify_split(answer, results + [{"q": question}])
         if bad:
             answer = _mask(answer, bad)
-    return {"answer": answer, "backend": backend, "numbers_checked": len(nums), "unverified": bad,
-            "retried": retried, "actions": tools.actions, "tool_calls": [r["tool"] for r in results]}
+    model = os.getenv("NEBIUS_MODEL", NEBIUS_MODEL) if used["backend"] == "nebius" else None
+    return {"answer": answer, "backend": f"nebius: {model}" if model else used["backend"],
+            "numbers_checked": len(nums) - len(from_web), "unverified": bad, "web_numbers": from_web,
+            "sources": _sources(results), "retried": retried, "actions": tools.actions,
+            "tool_calls": [r["tool"] for r in results]}

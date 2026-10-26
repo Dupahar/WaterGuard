@@ -12,8 +12,9 @@ event and no longer have one, using the pre-event OSM road network with impacted
   point must not strand a whole suburb). "people stranded" = people x share of buildings cut off.
 - Settlements: OSM place points (village, hamlet, town...) plus unnamed clusters of >= MIN_CLUSTER
   buildings that have no named place nearby, so unmapped hamlets are not missed.
-- People: estimated as all buildings x NEPAL_HH_SIZE (2021 census average household size).
-  This is an assumption, stated wherever the number is shown.
+- People: the sum over a settlement's buildings of their WorldPop share when the run has a population
+  layer (exposure.py); otherwise all buildings x NEPAL_HH_SIZE (2021 census average household size).
+  Either way an estimate, stated wherever the number is shown.
 """
 import geopandas as gpd
 import networkx as nx
@@ -70,6 +71,7 @@ def settlements(osm, crs, boundary) -> gpd.GeoDataFrame:
     order = np.lexsort((np.round(pts.y.values, 2), np.round(pts.x.values, 2)))
     b, pts = b.iloc[order], pts.iloc[order]
     xy = np.c_[pts.x, pts.y]
+    pop = b["people"].to_numpy(dtype=float) if "people" in b and b["people"].notna().any() else None
     rows = []
     # assign buildings to nearest named place within 1 km; cluster the rest
     if len(p):
@@ -88,6 +90,7 @@ def settlements(osm, crs, boundary) -> gpd.GeoDataFrame:
     for i, r in enumerate(p.itertuples()):
         rows.append({"name": r.name, "name_ne": r.name_ne, "kind": r.place,
                      "buildings": int(counts[i]) if len(p) else 0, "geometry": r.geometry,
+                     "people": float(np.nansum(pop[owner == i])) if pop is not None else None,
                      "sample": sample(xy[owner == i], (r.geometry.x, r.geometry.y))})
     rest = owner < 0
     if rest.sum() >= MIN_CLUSTER:
@@ -105,10 +108,15 @@ def settlements(osm, crs, boundary) -> gpd.GeoDataFrame:
                 if m.sum() >= MIN_CLUSTER:
                     cx, cy = sub[m].mean(0)
                     rows.append({"name": None, "name_ne": None, "kind": "building cluster",
-                                 "buildings": int(m.sum()), "geometry": Point(cx, cy), "sample": sample(sub[m], (cx, cy))})
+                                 "buildings": int(m.sum()), "geometry": Point(cx, cy),
+                                 "people": float(np.nansum(pop[rest][m])) if pop is not None else None,
+                                 "sample": sample(sub[m], (cx, cy))})
     s = gpd.GeoDataFrame(rows, geometry="geometry", crs=crs)
-    s["people_est"] = (s["buildings"] * NEPAL_HH_SIZE).round().astype(int)
-    return s
+    if pop is not None:
+        s["people_est"] = s["people"].fillna(0).round().astype(int)
+    else:
+        s["people_est"] = (s["buildings"] * NEPAL_HH_SIZE).round().astype(int)
+    return s.drop(columns=["people"])
 
 
 def _component_reach(G, sources):

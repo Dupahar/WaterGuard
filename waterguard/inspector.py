@@ -35,7 +35,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from . import telemetry, vision
+from . import second_look, telemetry, vision
 from .pipeline import RUNS_DIR
 
 # evidence lines: a flagged cell vs unflagged valley ground nearby (set on AOI01 + AOI02 + Tadi Khola control)
@@ -103,12 +103,34 @@ def _names(L, yes=True):
     return ", ".join(k for k, x in L.items() if x == yes) or "none"
 
 
+def look_twice(s, action, why):
+    """Before a cell goes to a person, a vision-language model may read its chip (second_look.py).
+    Its read can only turn 'ask a human' into 'flag as a likely false alarm' (a person still decides),
+    and only when the colour line is absent too; otherwise it is attached to the review card. It can
+    never confirm."""
+    if action != "ask_human":
+        return action, why
+    sl = s.get("second_look")
+    if sl is None and s.get("can_look"):
+        return "second_look", f"{why}: let Nemotron VL read the chip before it goes to a person"
+    if sl and "error" not in sl:
+        read = f"Nemotron VL reads {sl['cause']} ({sl['confidence']:.0%}): {sl['explanation']}"
+        if second_look.says_not_flood(sl) and not lines(s["m"])["colour"]:
+            return "flag", f"{why}; {read}"
+        return "ask_human", f"{why}; {read}"
+    return action, why
+
+
 class RulePlanner:
     """s = the cell's state: m (latest measurements), realign (None | 'ok' | 'failed'),
-    zoom (None | quadrant measurements), later (None | measurements of a later image), can_fetch."""
+    zoom (None | quadrant measurements), later (None | measurements of a later image), can_fetch,
+    second_look (None | the vision-language model's read), can_look."""
     name = "rules"
 
     def decide(self, cell, s):
+        return look_twice(s, *self._decide(cell, s))
+
+    def _decide(self, cell, s):
         m, later = s["m"], s.get("later")
         L = lines(m)
         n = sum(L.values())
@@ -155,50 +177,75 @@ class LLMPlanner:
                      ("zoom", "Measure the cell's four 300 m quadrants separately (mixed ground)."),
                      ("look_later", "Fetch a fresh cloud-free image of this cell from weeks later and measure again."),
                      ("confirm", "The flagged ground is flood/debris damage."),
+                     ("second_look", "Show the analyst chip (before | after | colour change) to a vision-language model "
+                                     "and get its independent read of what caused the change. It cannot confirm."),
                      ("ask_human", "Send to an analyst: evidence is mixed or insufficient."),
                      ("flag", "Likely false alarm (e.g. the change reverted). An analyst still decides."))]
     SYSTEM = ("You inspect one 600 m cell of a satellite flood-impact map. You get OpenCV measurements of the flagged "
               "ground compared with nearby unflagged valley ground ('contrast' = flagged minus reference), the four "
               "evidence lines (colour, vegetation, structure, radar), how well before and after line up "
               "(coreg_shift_px, residual_flow_px), and the results of tools you already used: realign, zoom "
-              "(per-quadrant evidence lines) and look_later (the same measurements on a later image). Debris and "
-              "scour persist for months; wet soil, turbid water and seasonal green-up do not. Each tool can be used "
-              "once per cell. Call exactly one tool.")
+              "(per-quadrant evidence lines), look_later (the same measurements on a later image) and second_look "
+              "(a vision-language model's read of the chip). Debris and scour persist for months; wet soil, turbid "
+              "water and seasonal green-up do not. Each tool can be used once per cell. Call exactly one tool.")
+    PLANNER_MODEL = "nvidia/Nemotron-3-Ultra-550b-a55b"   # reasoning model for the planner (Nebius Token Factory)
 
     def __init__(self):
         from .copilot import _backend, _call_bedrock, _call_openai
         b = _backend()
         if b is None:
             raise RuntimeError("no LLM backend configured (see copilot.py)")
-        self.call = _call_bedrock if b == "bedrock" else _call_openai
-        self.name = f"llm ({b})"
+        if b == "bedrock":
+            self.call, self.model = _call_bedrock, os.getenv("BEDROCK_MODEL", "bedrock default")
+        else:
+            self.model = (os.getenv("NEBIUS_PLANNER_MODEL", self.PLANNER_MODEL) if b == "nebius"
+                          else os.getenv("OPENAI_MODEL"))
+            self.call = lambda msgs, tools: _call_openai(msgs, tools, model=self.model)
+        self.name = f"llm ({b}: {self.model})"
         self.fallback = RulePlanner()
 
     def decide(self, cell, s):
+        self.__dict__.setdefault("stats", {"decisions": 0, "overruled": 0, "fallback": 0, "seconds": 0.0})
+        self.stats["decisions"] += 1
+        t = time.time()
+        try:
+            return self._decide(cell, s)
+        finally:
+            self.stats["seconds"] = round(self.stats["seconds"] + time.time() - t, 1)
+
+    def _overrule(self, why):
+        self.stats["overruled"] += 1
+        return "ask_human", why
+
+    def _decide(self, cell, s):
         m, later = s["m"], s.get("later")
         L = lines(m)
         payload = {"cell": {k: cell.get(k) for k in ("impact_ha", "buildings_hit", "road_segments_cut", "people_nearby_est")},
                    "measurements": m, "evidence_lines": L, "misaligned": misaligned(m), "realign": s.get("realign"),
                    "zoom": _lines_brief(s["zoom"]) if s.get("zoom") else None,
                    "later_look": later, "later_persistence": persistence(later) if later else None,
-                   "can_fetch_more_imagery": s["can_fetch"]}
+                   "can_fetch_more_imagery": s["can_fetch"],
+                   "second_look": s.get("second_look"), "can_use_second_look": bool(s.get("can_look"))}
         msgs = [{"role": "system", "content": self.SYSTEM},
                 {"role": "user", "content": json.dumps(payload, default=str)}]
         try:
             _, calls, _ = self.call(msgs, self.TOOLS)
             action, reason = calls[0][1], calls[0][2].get("reason", "")
         except Exception as e:
+            self.stats["fallback"] += 1
             a, r = self.fallback.decide(cell, s)
             return a, f"{r} (rules; model unavailable: {str(e)[:60]})"
         n = sum(L.values())
         if action == "confirm" and not can_confirm(s):
-            return "ask_human", f"model wanted to confirm ({reason}) but only {n} of 4 lines agree: needs an analyst"
+            return self._overrule(f"model wanted to confirm ({reason}) but only {n} of 4 lines agree: needs an analyst")
         if action == "look_later" and (not s["can_fetch"] or later is not None):
-            return "ask_human", f"model asked for more imagery ({reason}); none available: needs an analyst"
+            return self._overrule(f"model asked for more imagery ({reason}); none available: needs an analyst")
         if (action == "realign" and s.get("realign")) or (action == "zoom" and s.get("zoom") is not None):
-            return "ask_human", f"model asked for {action} again ({reason}): needs an analyst"
-        if action not in {"realign", "zoom", "look_later", "confirm", "ask_human", "flag"}:
-            return "ask_human", "model gave no valid action"
+            return self._overrule(f"model asked for {action} again ({reason}): needs an analyst")
+        if action == "second_look" and not s.get("can_look"):
+            return self._overrule(f"model asked for a second look ({reason}); not available or already used: needs an analyst")
+        if action not in {"realign", "zoom", "look_later", "second_look", "confirm", "ask_human", "flag"}:
+            return self._overrule("model gave no valid action")
         return action, reason
 
 
@@ -210,18 +257,24 @@ def _lines_brief(parts):
     return [{"part": p["part"], "impact_ha": p["impact_ha"], "lines": lines(p["measurements"])} for p in parts]
 
 
-def settle(ev, cell: dict, P, chips: Path | None = None, later_look=None, tools=("realign", "zoom")) -> dict:
+def settle(ev, cell: dict, P, chips: Path | None = None, later_look=None, tools=("realign", "zoom"),
+           look="auto") -> dict:
     """Run the perceive -> decide -> act loop on one cell until it is settled.
     later_look: callable(cell) -> (band overrides, scenes) or None when no more downloads are allowed.
-    tools: which OpenCV tools the agent may use (the others count as already tried)."""
+    tools: which OpenCV tools the agent may use (the others count as already tried).
+    look: callable(chip path) -> a vision-language model's read (second_look.read), None for no second
+    look; "auto" uses Nemotron VL when a Nebius key is set. Needs chips (it reads the chip)."""
+    if look == "auto":
+        look = second_look.read if second_look.available() else None
     chip = chips / f"{cell['id']}.png" if chips else None
     m = vision.measure(ev, cell, chip)
     trace = [{"step": "perceive", "tool": "vision.measure", "lines": lines(m),
               "coreg_shift_px": m.get("coreg_shift_px"), "residual_flow_px": m.get("residual_flow_px")}]
     s = {"m": m, "realign": None if "realign" in tools else "off", "zoom": None if "zoom" in tools else [],
-         "later": None}
+         "later": None, "second_look": None}
     for step in range(MAX_STEPS + 1):
         s["can_fetch"] = later_look is not None and s["later"] is None
+        s["can_look"] = look is not None and chip is not None and s["second_look"] is None
         action, why = P.decide(cell, s)
         if action not in ("confirm", "ask_human", "flag") and step == MAX_STEPS:
             action, why = "ask_human", f"{why} (step budget used up: needs an analyst)"
@@ -251,6 +304,11 @@ def settle(ev, cell: dict, P, chips: Path | None = None, later_look=None, tools=
             s["later"] = later
             trace.append({"step": "act", "tool": "vision.later_look", "scenes": scenes,
                           "persistence": persistence(later)})
+        elif action == "second_look":
+            s["second_look"] = sl = look(chip)
+            trace.append({"step": "act", "tool": "nemotron.second_look",
+                          **{k: sl.get(k) for k in ("cause", "confidence", "explanation", "debris_visible",
+                                                    "vegetation_lost", "model", "seconds", "error")}})
     verdict = {"confirm": "confirmed", "ask_human": "needs_review", "flag": "likely_false_alarm"}[action]
     return {"verdict": verdict, "reason": why, "state": s, "trace": trace,
             "chip": chip.name if chip else None}
@@ -283,7 +341,8 @@ def inspect(run_id: str, max_cells: int = 40, planner: str = "rules", max_fetche
         s, verdict, why = r["state"], r["verdict"], r["reason"]
         tools_used = [t["tool"] for t in r["trace"] if t["step"] == "act"]
         out.append({**cell, "verdict": verdict, "reason": why, "measurements": s["m"], "realign": s["realign"],
-                    "zoom": _lines_brief(s["zoom"]) if s["zoom"] else None, "later": s["later"], "trace": r["trace"],
+                    "zoom": _lines_brief(s["zoom"]) if s["zoom"] else None, "later": s["later"],
+                    "second_look": s["second_look"], "trace": r["trace"],
                     "chip": f"inspect/{r['chip']}",
                     "chip_later": f"inspect/{cell['id']}_later.png" if s["later"] else None,
                     "review": None})
@@ -303,7 +362,7 @@ def inspect(run_id: str, max_cells: int = 40, planner: str = "rules", max_fetche
                 tool_calls[t["tool"]] = tool_calls.get(t["tool"], 0) + 1
     res = {"run_id": run_id, "planner": P.name, "inspected_utc": _now(), "runtime_s": round(time.time() - t0, 1),
            "cells_total": len(todo), "cells_inspected": len(out), "later_looks": fetches, "tool_calls": tool_calls,
-           "cells": out}
+           "planner_stats": getattr(P, "stats", None), "cells": out}
     res["summary"] = summary(res)
     save(run_id, res)
     s = res["summary"]
@@ -359,7 +418,8 @@ def apply_review(run_id: str) -> dict:
     removed = [c for c in res["cells"] if (c.get("review") or {}).get("decision") == "remove"]
     facts = json.loads((RUNS_DIR / run_id / "facts.json").read_text(encoding="utf-8"))
     veto = [{"rows": c["rows"], "cols": c["cols"], "id": c["id"]} for c in removed]
-    return run(facts["area"]["bbox"], facts["event_time_utc"], veto=veto)
+    return run(facts["area"]["bbox"], facts["event_time_utc"], veto=veto,
+               exposure=facts.get("method", {}).get("exposure", "osm"))
 
 
 def ready_to_publish(run_id: str) -> tuple[bool, str]:

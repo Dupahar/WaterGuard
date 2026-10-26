@@ -44,9 +44,16 @@ export type Cv = {
 	trace: {step: string; tool?: string; lines?: Record<string, boolean>}[];
 	robustness: {shift_px: number; variant: string; cells: number; confirmed_cells: number; false_confirmations: number; real_damage_ha_auto_confirmed_pct: number; realigned_cells: number}[];
 };
+/** real Nemotron outputs (scripts/export_nemotron.py) */
+export type Nem = {
+	planner: {model: string; cell: string; area: string; verdict: string; chip: string | null;
+		trace: {step: string; tool?: string; action?: string; reason?: string; lines?: Record<string, boolean>; cause?: string; confidence?: number; explanation?: string}[]};
+	copilot: {summary: {questions: number; answers_fully_verified: number; numbers_total: number; backend: string; median_seconds: number};
+		web: {q: string; answer: string; web_numbers: string[]; sources: string[]; numbers: number}};
+};
 export type Cor = {ext: [number, number, number, number]; path: [number, number][]; places: {name: string; c: [number, number]}[]};
 
-type D = {p: PData; cor: Cor; cv: Cv};
+type D = {p: PData; cor: Cor; cv: Cv; nem: Nem};
 let cache: D | null = null;
 let pending: Promise<D> | null = null;
 /** load once per bundle; delayRender keeps the frame from rendering before the data is there */
@@ -58,8 +65,9 @@ export const loadData = (): Promise<D> => {
 			fetch(staticFile('data/product.json')).then((r) => r.json()),
 			fetch(staticFile('data/corridor.json')).then((r) => r.json()),
 			fetch(staticFile('data/cv/cell.json')).then((r) => r.json()),
-		]).then(([p, cor, cv]) => {
-			cache = {p, cor, cv};
+			fetch(staticFile('data/nemotron/nemotron.json')).then((r) => r.json()),
+		]).then(([p, cor, cv, nem]) => {
+			cache = {p, cor, cv, nem};
 			continueRender(h);
 			return cache;
 		});

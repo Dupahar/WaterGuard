@@ -3,10 +3,12 @@ import {Composition} from 'remotion';
 import {Film} from './Film';
 import {END, FPS, H, W} from './lib';
 import {Product, PRODUCT_FRAMES} from './product/Product';
+import {Short, SHORT_FRAMES} from './product/Short';
 
 export const Root: React.FC = () => (
 	<>
 		<Composition id="Launch" component={Film} durationInFrames={Math.round(END * FPS)} fps={FPS} width={W} height={H} />
 		<Composition id="Product" component={Product} durationInFrames={PRODUCT_FRAMES} fps={FPS} width={W} height={H} />
+		<Composition id="Short" component={Short} durationInFrames={SHORT_FRAMES} fps={FPS} width={W} height={H} />
 	</>
 );

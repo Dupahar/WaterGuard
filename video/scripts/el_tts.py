@@ -14,7 +14,7 @@ OUT = ROOT / "video/public/audio/VO_ELEVENLABS"
 VOICE = "t65y7fZZv3UrpG7b4PUD"     # Kashvi
 SETTINGS = {"stability": 0.45, "similarity_boost": 0.75, "style": 0.15, "use_speaker_boost": True, "speed": 1.0}
 # spoken spellings only; the written script stays as is
-SAY = {"WaterGuard": "Water Guard", "OpenCV 5": "Open C V five", "ECC": "E C C", "MAGSAC": "mag-sack", "EC2": "E C 2",
+SAY = {"WaterGuard": "Water Guard", "OpenCV 5": "Open C V five", "ECC": "E C C", "MAGSAC": "mag-sack", "EC2": "E C 2", "Super VL": "Super V L",
        "AWS": "A W S"}
 
 if __name__ == "__main__":

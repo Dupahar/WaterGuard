@@ -3,15 +3,18 @@ Music: Mixkit (free licence). Silent Descent #871 under the hook; Tech House Vib
 problem behind a low-pass sweep and its kick lands on "WaterGuard"; Motivating Mornings #33 takes over at the
 inspector, beat-matched (both are 123 BPM), and its final stop-hit lands on "This is WaterGuard".
 Both grooves are lengthened by repeating whole 8-bar phrases, never by stretching. Ducked under every block.
-VO comes from public/audio/vo_product/s{n}.wav (written by product_timeline.py, Polly guide or ElevenLabs)."""
-import json, subprocess, sys
+VO comes from public/audio/vo_product/s{n}.wav (written by product_timeline.py, Polly guide or ElevenLabs).
+A cut of the film (short_timeline.py) is mixed the same way from its remapped timeline:
+    MIX_TIMELINE=video/src/product/short_timeline.json MIX_OUT=short_mix.wav python video/scripts/product_mix.py"""
+import json, os, subprocess, sys
 from pathlib import Path
 import numpy as np
 
 V = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(V / "scripts"))
 SR = 48000
-tl = json.load(open(V / "src/product/timeline.json"))
+tl = json.load(open(os.environ.get("MIX_TIMELINE", V / "src/product/timeline.json")))
+SC = {s["n"]: s for s in tl["scenes"]}
 END = tl["end"]
 N = int(END * SR)
 
@@ -41,11 +44,11 @@ def env(points):
 
 
 def word(n, w, nth=0):
-    hits = [x for x in tl["scenes"][n - 1]["words"] if "".join(c for c in x[2].lower() if c.isalnum()) == w]
+    hits = [x for x in SC[n]["words"] if "".join(c for c in x[2].lower() if c.isalnum()) == w]
     return hits[nth][0]
 
 
-drop = word(2, "water")
+drop = word(2, "water") if 2 in SC else SC[min(SC, key=lambda k: SC[k]["start"] if k > 1 else 1e9)]["start"]
 hit = word(12, "water")            # "This is WaterGuard"
 P = 60 / 123.047                   # beat of both grooves
 K130 = 15.81                       # Tech House: first full-kick downbeat after the 8-bar intro
@@ -86,7 +89,7 @@ b = load(V / "public/audio/mixkit_tech_house_vibes_130.mp3")
 c = load(V / "public/audio/mixkit_motivating_mornings_33.mp3")
 for x, sl in ((a, slice(SR * 40, SR * 80)), (b, slice(SR * 20, SR * 75)), (c, slice(SR * 15, SR * 75))):
     x *= 10 ** ((-16 - rms_db(x[sl])) / 20)
-c_at = tl["scenes"][7]["start"] - 1.5          # the inspector block
+c_at = SC[8]["start"] - 1.5 if 8 in SC else drop + 60    # the inspector block
 # Tech House: kick on "WaterGuard", breakdown arriving just before the inspector
 n130 = max(0, round((c_at - drop - (BRK130 - K130)) / (32 * P)))
 b = extend(b, K130 + 64 * P, 32, n130)
@@ -124,7 +127,7 @@ for s in tl["scenes"]:
 vo *= 10 ** ((-3.0 - 20 * np.log10(np.abs(vo).max() + 1e-9)) / 20)
 mix = m * 0.56 + vo
 mix *= 0.98 / max(1e-9, np.abs(mix).max())
-out = V / "public/audio/product_mix.wav"
+out = V / "public/audio" / os.environ.get("MIX_OUT", "product_mix.wav")
 subprocess.run(["ffmpeg", "-v", "error", "-y", "-f", "f32le", "-ac", "2", "-ar", str(SR), "-i", "-", "-c:a", "pcm_s16le", str(out)],
                input=np.clip(mix, -1, 1).astype(np.float32).tobytes(), check=True)
 print("wrote", out.name, f"{N / SR:.1f}s; drop {drop:.2f} (+{n130} phrases), breakdown {brk:.2f}, mornings from {c_at2:.2f} (+{n33}), hit {c_at2 + HIT33 + n33 * 32 * P:.2f} vs word {hit:.2f}")

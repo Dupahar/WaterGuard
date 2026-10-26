@@ -1,4 +1,4 @@
-"""Product-film voiceover -> src/product/timeline.json (every visual cue is a word time from here).
+r"""Product-film voiceover -> src/product/timeline.json (every visual cue is a word time from here).
 
 Same method as make_timeline.py: trim silence, cap inner pauses, faster-whisper word timestamps,
 blocks laid out in ORDER with LEAD before the first, GAPS[n] before block n (room for visual beats), TAIL after.
@@ -20,8 +20,8 @@ SRC = Path(os.environ.get("VO_SRC", VO))     # ElevenLabs read: VO_SRC=video/pub
 make_timeline.PAUSE = float(os.environ.get("VO_PAUSE", make_timeline.PAUSE))   # inner-pause cap, s
 OUT = V / "src/product/timeline.json"
 LEAD, TAIL = 2.4, 5.5
-GAPS = {2: 1.4, 3: 1.8, 4: 2.4, 5: 2.0, 6: 2.6, 7: 2.4, 8: 2.4, 13: 2.6, 14: 2.4, 9: 2.6, 10: 2.2, 11: 2.0, 12: 2.4}
-ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 13, 14, 9, 10, 11, 12]
+GAPS = {2: 1.4, 3: 1.8, 4: 2.4, 5: 2.0, 6: 2.6, 7: 2.4, 8: 2.4, 13: 2.6, 15: 2.6, 14: 2.4, 9: 2.6, 10: 2.2, 11: 2.0, 12: 2.4}
+ORDER = [1, 2, 3, 4, 5, 6, 7, 8, 13, 15, 14, 9, 10, 11, 12]
 
 if __name__ == "__main__":
     from faster_whisper import WhisperModel

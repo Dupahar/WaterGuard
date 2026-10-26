@@ -16,6 +16,7 @@ import json
 import os
 import threading
 import traceback
+from datetime import datetime, timedelta, timezone
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
@@ -24,7 +25,8 @@ from pydantic import BaseModel
 
 from . import chain, copilot, inspector, ledger, sitrep
 from .config import ROOT
-from .pipeline import RUNS_DIR, run, run_id
+from .pipeline import EXPOSURE_MODES, RUNS_DIR, default_exposure, run, run_id
+from .providers.base import as_utc
 
 app = FastAPI(title="WaterGuard")
 JOBS: dict = {}
@@ -37,6 +39,7 @@ STATIC = ROOT / "web"
 class RunReq(BaseModel):
     bbox: list[float]
     date: str
+    exposure: str | None = None     # "osm" | "open" (default: WATERGUARD_EXPOSURE)
 
 
 class ChatReq(BaseModel):
@@ -60,23 +63,45 @@ def _facts(rid):
     return json.loads(p.read_text(encoding="utf-8")) if p.exists() else None
 
 
+MAX_QUEUE = int(os.getenv("WATERGUARD_MAX_QUEUE", "4"))          # runs + inspections waiting or running
+ALLOW_LLM_PLANNER = os.getenv("WATERGUARD_ALLOW_LLM_PLANNER", "") == "1"
+
+
+def _busy() -> int:
+    return sum(j.get("state") == "running" for j in list(JOBS.values()) + list(INSPECT.values()))
+
+
 @app.post("/api/runs")
 def start(req: RunReq):
     if len(req.bbox) != 4:
         raise HTTPException(400, "bbox must be [west, south, east, north]")
+    w, s_, e, n = req.bbox
+    if not (-180 <= w < e <= 180 and -90 <= s_ < n <= 90):
+        raise HTTPException(400, "bbox must be [west, south, east, north] in degrees")
     date = req.date if "T" in req.date else req.date + "T00:00:00Z"
-    rid = run_id(req.bbox, date)
+    try:
+        ev = as_utc(date)
+    except ValueError:
+        raise HTTPException(400, "date must be YYYY-MM-DD or an ISO time")
+    if not datetime(2015, 1, 1, tzinfo=timezone.utc) <= ev <= datetime.now(timezone.utc) + timedelta(days=1):
+        raise HTTPException(400, "the event date must be between 2015 and today")
+    exposure = req.exposure or default_exposure()
+    if exposure not in EXPOSURE_MODES:
+        raise HTTPException(400, f"exposure must be one of {EXPOSURE_MODES}")
+    rid = run_id(req.bbox, date, exposure)
     if _facts(rid):
         return {"run_id": rid, "cached": True}
     with LOCK:
         if rid in JOBS and JOBS[rid]["state"] == "running":
             return {"run_id": rid}
+        if _busy() >= MAX_QUEUE:
+            raise HTTPException(429, "the server is busy with other analyses; try again in a few minutes")
         JOBS[rid] = {"state": "running", "step": "queued", "pct": 0}
 
     def work():
         try:
             with SLOTS:
-                run(req.bbox, date, progress=lambda m, p: JOBS[rid].update(step=m, pct=p))
+                run(req.bbox, date, progress=lambda m, p: JOBS[rid].update(step=m, pct=p), exposure=exposure)
             JOBS[rid]["state"] = "done"
             ledger.build(rid)
         except Exception as e:
@@ -118,8 +143,12 @@ def report(rid: str, lang: str = "en"):
 def chat(rid: str, req: ChatReq):
     if not _facts(rid):
         raise HTTPException(404, "unknown run")
+    if len(req.message) > 600:
+        raise HTTPException(400, "question too long (600 characters at most)")
+    history = [{"role": h.get("role"), "text": str(h.get("text", ""))[:2000]} for h in req.history[-6:]
+               if isinstance(h, dict) and h.get("role") in ("user", "assistant")]
     try:
-        return copilot.ask(rid, req.message, req.history, req.point)
+        return copilot.ask(rid, req.message, history, req.point)
     except Exception as e:
         traceback.print_exc()
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -172,8 +201,12 @@ READONLY_REVIEW = os.getenv("WATERGUARD_READONLY_REVIEW", "") == "1"
 def start_inspect(rid: str, planner: str = "rules"):
     if not _facts(rid):
         raise HTTPException(404, "unknown run")
+    if planner not in ("rules", "llm") or (planner == "llm" and not ALLOW_LLM_PLANNER):
+        planner = "rules"            # the model planner costs real money: only where the operator allows it
     if INSPECT.get(rid, {}).get("state") == "running":
         return INSPECT[rid]
+    if _busy() >= MAX_QUEUE:
+        raise HTTPException(429, "the server is busy with other analyses; try again in a few minutes")
     INSPECT[rid] = {"state": "running", "step": "queued", "pct": 0}
 
     def work():

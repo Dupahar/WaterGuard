@@ -64,7 +64,8 @@ def assess(osm, impact: gpd.GeoDataFrame, crs) -> dict:
             "buildings_total": int(len(b)),
             "buildings_likely_affected": int(b_l.sum()),
             "buildings_possibly_affected": int(b_p.sum()),
-            "people_est_in_likely_affected_buildings": int(round(int(b_l.sum()) * HH_SIZE)),
+            "people_est_in_likely_affected_buildings": int(round(float(np.nansum(b.loc[b_l, "people"]))))
+                if "people" in b and b["people"].notna().any() else int(round(int(b_l.sum()) * HH_SIZE)),
             "bridges_total": int(len(br)),
             "bridges_likely_damaged": int(br_l.sum()),
             "bridges_possibly_damaged": int(br_p.sum()),

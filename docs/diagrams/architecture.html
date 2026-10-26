@@ -4,7 +4,7 @@
 <!-- Rendered to docs/figures/architecture.png: see docs/diagrams/render.sh -->
 <style>
   * { box-sizing: border-box; }
-  body { margin: 0; width: 1800px; height: 1050px; background: #0b1220; color: #e6edf6;
+  body { margin: 0; width: 1800px; height: 1130px; background: #0b1220; color: #e6edf6;
          font-family: "Segoe UI", Inter, Arial, sans-serif; position: relative; }
   h1 { margin: 0; position: absolute; left: 48px; top: 30px; font-size: 34px; font-weight: 650; }
   h1 span { color: #8aa0bd; font-weight: 400; font-size: 22px; margin-left: 14px; }
@@ -26,6 +26,10 @@
   .chain { border-color: #4cd08a; background: #10301f; }
   .chain b { color: #6fe3a5; }
   .human { border-color: #ffd166; background: #2d2810; }
+  .nv { border-color: #76b900; background: #16260a; }
+  .nv b { color: #9be01f; }
+  .nvz { border-color: #76b900aa; }
+  .nvz > .tag { color: #9be01f; }
   .human b { color: #ffd98a; }
   svg { position: absolute; left: 0; top: 0; }
   .legend { position: absolute; left: 48px; bottom: 26px; font-size: 16px; color: #9fb1c9; }
@@ -35,28 +39,30 @@
 <h1>WaterGuard <span>flood damage from space: what runs where</span></h1>
 
 <!-- open data -->
-<div class="zone" style="left:40px;top:110px;width:330px;height:610px"><div class="tag">Open data (no keys)</div></div>
+<div class="zone" style="left:40px;top:110px;width:330px;height:790px"><div class="tag">Open data (no keys)</div></div>
 <div class="box" style="left:66px;top:140px;width:280px"><b>Sentinel-1 RTC</b><small>radar, sees through monsoon cloud</small></div>
 <div class="box" style="left:66px;top:236px;width:280px"><b>Sentinel-2 L2A</b><small>optical, before / after / weeks later</small></div>
 <div class="box" style="left:66px;top:332px;width:280px"><b>Copernicus DEM</b><small>valley floor (HAND), flow paths</small></div>
 <div class="box" style="left:66px;top:428px;width:280px"><b>OpenStreetMap (ohsome)</b><small>buildings, roads, bridges as they were the day before</small></div>
-<div class="box" style="left:66px;top:548px;width:280px"><small>Microsoft Planetary Computer STAC: Sentinel + DEM; ohsome API: OSM history</small></div>
+<div class="box" style="left:66px;top:544px;width:280px"><b>Open Buildings</b><small>Google + Microsoft footprints OSM lacks (pre-event imagery)</small></div>
+<div class="box" style="left:66px;top:650px;width:280px"><b>WorldPop</b><small>constrained 100 m population, event year</small></div>
+<div class="box" style="left:66px;top:756px;width:280px"><small>Planetary Computer STAC: Sentinel + DEM · ohsome: OSM history · Source Cooperative: footprints</small></div>
 
 <!-- AWS -->
 <div class="zone aws" style="left:420px;top:110px;width:1340px;height:780px"><div class="tag">AWS · ap-south-1</div></div>
 <div class="box awsb" style="left:450px;top:140px;width:250px"><b>CloudFront</b><small>HTTPS, caching; the only way in</small></div>
 <div class="box awsb" style="left:450px;top:250px;width:250px"><b>S3</b><small>app + data bundles</small></div>
 <div class="box awsb" style="left:450px;top:362px;width:250px"><b>SSM Parameter Store</b><small>secrets (encrypted), never in the image</small></div>
-<div class="box awsb" style="left:450px;top:478px;width:250px"><b>Amazon Bedrock</b><small>LLM planner + copilot (Nova Pro); or any OpenAI-compatible endpoint</small></div>
+<div class="box awsb" style="left:450px;top:478px;width:250px"><b>Amazon Bedrock</b><small>fallback for the copilot if Nebius is unreachable</small></div>
 <div class="box awsb" style="left:450px;top:612px;width:250px"><b>CloudWatch</b><small>container logs; agent metrics from Embedded Metric Format lines</small></div>
 <div class="box awsb" style="left:450px;top:740px;width:250px"><b>IAM role</b><small>least privilege: read bucket, read parameter, invoke model, write logs</small></div>
 
 <!-- EC2 -->
 <div class="zone aws" style="left:740px;top:140px;width:995px;height:725px;border-style:solid;border-color:#ff990066"><div class="tag">EC2 · Docker container</div></div>
-<div class="box" style="left:765px;top:170px;width:440px"><b>FastAPI + MapLibre dashboard</b><small>pick an area and a date, follow the run, review the queue, verify the proof</small></div>
+<div class="box" style="left:765px;top:170px;width:440px"><b>FastAPI + MapLibre dashboard</b><small>pick an area and a date, follow the run, ask the copilot, review the queue, verify the proof</small></div>
 
 <div class="box cv" style="left:765px;top:290px;width:440px"><b>Detection pipeline · OpenCV 5</b><small>radar change (box filters), optical change, valley prior, morphology open/close, connected components, distance transform for riverbed growth</small></div>
-<div class="box" style="left:765px;top:452px;width:440px"><b>Damage + access</b><small>buildings / roads / bridges hit; road network (NetworkX): who is cut off</small></div>
+<div class="box" style="left:765px;top:452px;width:440px"><b>Damage + access</b><small>buildings (OSM + open footprints) / roads / bridges hit; people (WorldPop); road network: who is cut off</small></div>
 
 <div class="box agent" style="left:1240px;top:170px;width:470px;height:420px"><b>Inspector agent</b>
 <small>perceive → decide → act, per 600 m cell, until settled</small>
@@ -64,9 +70,9 @@
 <span style="color:#7fd6ff">perceive (OpenCV 5)</span><br>
 ECC co-registration · CIELAB ΔE · SSIM · Laplacian texture · DIS optical flow (residual shift, forward-backward) · Canny edge artefacts · contours, hull<br>
 <span style="color:#cbb2ff">decide</span><br>
-rule planner, or an LLM planner under guard rails (Amazon Bedrock, or Nemotron on any OpenAI-compatible endpoint)<br>
+rule planner, or <span style="color:#9be01f">Nemotron Ultra</span> picking each next tool under guard rails in code<br>
 <span style="color:#7fd6ff">act (tools)</span><br>
-realign: SIFT + USAC MAGSAC++ · zoom: 300 m quadrants · look_later: fresh Sentinel-2 · confirm · ask_human · flag<br>
+realign: SIFT + USAC MAGSAC++ · zoom: 300 m quadrants · look_later: fresh Sentinel-2 · <span style="color:#9be01f">second_look: Nemotron VL reads the chip</span> · confirm · ask_human · flag<br>
 <span style="color:#ffb84d">observe</span><br>every step kept as a trace; every decision a CloudWatch metric
 </div></div>
 
@@ -74,7 +80,14 @@ realign: SIFT + USAC MAGSAC++ · zoom: 300 m quadrants · look_later: fresh Sent
 <div class="box chain" style="left:1240px;top:650px;width:470px"><b>Verifiable report</b><small>SHA-256 Merkle roots over files and settlement claims, anchored on a public chain once the queue is empty</small></div>
 <div class="box" style="left:765px;top:745px;width:440px"><b>Situation report</b><small>printable, EN / नेपाली, QR code to re-check it in any browser</small></div>
 
-<svg width="1800" height="1050">
+<!-- models and web, outside AWS -->
+<div class="zone nvz" style="left:40px;top:925px;width:1340px;height:138px"><div class="tag">Nebius Token Factory · NVIDIA Nemotron</div></div>
+<div class="box nv" style="left:66px;top:950px;width:420px"><b>Nemotron 3 Ultra 550B</b><small>inspector planner: picks realign / zoom / later look / second look</small></div>
+<div class="box nv" style="left:506px;top:950px;width:420px"><b>Nemotron 3.5 Super VL</b><small>second look: reads before / after / colour change like an analyst</small></div>
+<div class="box nv" style="left:946px;top:950px;width:420px"><b>Nemotron 3 Super 120B</b><small>copilot, English / नेपाली, every number checked against the maps</small></div>
+<div class="box" style="left:1410px;top:950px;width:350px"><b>Tavily (web reports)</b><small>news after the event, attributed, never a map input</small></div>
+
+<svg width="1800" height="1130">
   <defs><marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
     <path d="M0,0 L10,5 L0,10 z" fill="#8aa0bd"/></marker></defs>
   <g stroke="#8aa0bd" stroke-width="2.2" fill="none" marker-end="url(#a)">
@@ -86,7 +99,8 @@ realign: SIFT + USAC MAGSAC++ · zoom: 300 m quadrants · look_later: fresh Sent
     <path d="M1205,660 C1222,668 1222,690 1236,692"/>
     <path d="M985,692 L985,741"/>
     <path d="M700,180 L761,195"/>
+    <path d="M1150,946 L1150,870"/>
   </g>
 </svg>
 
-<div class="legend"><i style="background:#5ac8fa"></i>OpenCV 5<i style="background:#b388ff"></i>agent<i style="background:#ff9900"></i>AWS service<i style="background:#ffd166"></i>human control<i style="background:#4cd08a"></i>public ledger</div>
+<div class="legend"><i style="background:#5ac8fa"></i>OpenCV 5<i style="background:#b388ff"></i>agent<i style="background:#ff9900"></i>AWS service<i style="background:#ffd166"></i>human control<i style="background:#4cd08a"></i>public ledger<i style="background:#76b900"></i>NVIDIA Nemotron</div>

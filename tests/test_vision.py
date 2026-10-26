@@ -172,3 +172,59 @@ def test_settlement_sampling_ignores_osm_feature_order():
     a = access.settlements(SimpleNamespace(places=places, buildings=blds), crs, boundary)
     b = access.settlements(SimpleNamespace(places=places, buildings=blds.sample(frac=1, random_state=7)), crs, boundary)
     assert [sorted(s) for s in a["sample"]] == [sorted(s) for s in b["sample"]]
+
+
+# ---------------------------------------------------------------- second look (vision-language model)
+from waterguard import second_look  # noqa: E402
+
+
+def test_second_look_parses_model_reply():
+    r = second_look.parse('<think>hmm</think> Here: {"cause": "Seasonal vegetation change", "confidence": 1.4, '
+                          '"fresh_sediment_or_debris_visible": false, "vegetation_lost": true, "explanation": "greener fields"}')
+    assert r["cause"] == "seasonal vegetation change" and r["confidence"] == 1.0 and r["vegetation_lost"]
+    assert second_look.parse("no json")["error"]
+    assert second_look.parse('{"cause": "misalignment", "confidence": 0.8}')["cause"] == "image misalignment"
+
+
+WEAK = {"delta_e_contrast": 2, "ndvi_drop_contrast": 0.3, "ssim_dissimilarity_contrast": 0, "sar_z_contrast": 0,
+        "clear_share": 1.0, "coreg_shift_px": 0.2, "residual_flow_px": 0.1}
+
+
+def _read(cause, conf=0.9):
+    return {"cause": cause, "confidence": conf, "explanation": "x", "debris_visible": False, "vegetation_lost": False}
+
+
+def test_second_look_can_flag_but_never_confirm(scene):
+    ev, cell = scene
+    s = {"m": WEAK, "realign": "ok", "zoom": [], "later": None, "can_fetch": False, "second_look": None, "can_look": True}
+    assert inspector.RulePlanner().decide(cell, s)[0] == "second_look"
+    s.update(second_look=_read("seasonal vegetation change"), can_look=False)
+    assert inspector.RulePlanner().decide(cell, s)[0] == "flag"                 # likely false alarm, a person decides
+    s["second_look"] = _read("seasonal vegetation change", 0.5)
+    assert inspector.RulePlanner().decide(cell, s)[0] == "ask_human"            # not confident enough
+    s["second_look"] = _read("flood debris or scour", 1.0)
+    assert inspector.RulePlanner().decide(cell, s)[0] == "ask_human"            # the model alone never confirms
+    s.update(m={**WEAK, "delta_e_contrast": 20}, second_look=_read("cloud, haze or shadow"))
+    assert inspector.RulePlanner().decide(cell, s)[0] != "flag"                 # colour line present: no flag
+
+
+def test_llm_second_look_needs_a_chip(scene):
+    ev, cell = scene
+    P = inspector.LLMPlanner.__new__(inspector.LLMPlanner)
+    P.fallback = inspector.RulePlanner()
+    P.call = lambda msgs, tools: ("", [("1", "second_look", {"reason": "let me look"})], None)
+    s = {"m": WEAK, "realign": "ok", "zoom": [], "later": None, "can_fetch": False, "second_look": None, "can_look": False}
+    assert P.decide(cell, s)[0] == "ask_human" and P.stats["overruled"] == 1
+
+
+def test_settle_uses_the_second_look(scene, tmp_path):
+    ev, cell = scene
+    for k in ("red", "green", "blue"):                 # no colour change left: only vegetation and radar
+        ev.bands[f"{k}_post"] = ev.bands[f"{k}_pre"].copy()
+    seen = []
+    r = inspector.settle(ev, cell, inspector.RulePlanner(), chips=tmp_path,
+                         look=lambda chip: seen.append(chip) or _read("seasonal vegetation change"))
+    assert seen and seen[0].exists()
+    assert any(t.get("tool") == "nemotron.second_look" for t in r["trace"])
+    assert r["verdict"] in ("likely_false_alarm", "needs_review")
+    assert inspector.settle(ev, cell, inspector.RulePlanner(), look=None)["verdict"] != "confirmed"

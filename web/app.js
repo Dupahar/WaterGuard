@@ -44,8 +44,9 @@ function hint(t) { const h = $("#hint"); h.hidden = !t; h.textContent = t || "";
 $("#drawBtn").onclick = () => { state.drawing = true; state.corner = null; hint("Click the first corner of the area"); };
 $("#preset").onchange = (e) => {
   if (!e.target.value) return;
-  const [bb, dt] = e.target.value.split("|");
+  const [bb, dt, exposure] = e.target.value.split("|");
   setBbox(bb.split(",").map(Number));
+  state.exposure = exposure || null;     // an example can pin how people are counted (its published run)
   $("#date").value = dt.slice(0, 10);
   $("#hour").value = +dt.slice(11, 13);
 };
@@ -55,6 +56,7 @@ map.on("click", async (e) => {
     if (!state.corner) { state.corner = [lng, lat]; hint("Click the opposite corner"); return; }
     const c = state.corner;
     setBbox([Math.min(c[0], lng), Math.min(c[1], lat), Math.max(c[0], lng), Math.max(c[1], lat)]);
+    state.exposure = null;
     state.drawing = false; hint(null); return;
   }
   if (state.tracing) { state.tracing = false; hint(null); await trace(lng, lat); }
@@ -66,7 +68,7 @@ $("#runBtn").onclick = async () => {
   $("#runBtn").disabled = true;
   $("#progress").hidden = false;
   const r = await fetch("/api/runs", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ bbox: state.bbox, date }) }).then((r) => r.json());
+    body: JSON.stringify({ bbox: state.bbox, date, ...(state.exposure ? { exposure: state.exposure } : {}) }) }).then((r) => r.json());
   if (r.detail) { alert(r.detail); $("#runBtn").disabled = false; return; }
   poll(r.run_id);
 };
@@ -156,14 +158,16 @@ map.on("click", "settlements", (e) => {
   if (state.drawing || state.tracing) return;
   const p = e.features[0].properties;
   new maplibregl.Popup().setLngLat(e.lngLat).setHTML(
-    `<b>${p.name || "Unnamed cluster"}</b><br>${p.buildings} buildings · est. ${p.people_est} people<br>
-     Road: <b>${p.vehicle_status}</b>${p.vehicle_lost ? " (lost: " + p.vehicle_lost + ")" : ""}<br>
+    `<b>${esc(p.name || "Unnamed cluster")}</b><br>${p.buildings} buildings · est. ${p.people_est} people<br>
+     Road: <b>${esc(p.vehicle_status)}</b>${p.vehicle_lost ? " (lost: " + esc(p.vehicle_lost) + ")" : ""}<br>
      ${p.vehicle_health_km_before == null ? "No road to a mapped health facility in this area, even before the flood"
        : `Road km to health facility: ${p.vehicle_health_km_before} → ${p.vehicle_health_km_after ?? "no route now"}`}`).addTo(map);
 });
 
 // ---------------------------------------------------------------- results panel
 const fmt = (n) => (n ?? "–").toLocaleString("en-IN");
+/** text from OSM, analysts or a model goes into HTML only escaped */
+const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[ch]);
 function show(id, f) {
   state.runId = id; state.facts = f; state.history = [];
   $("#results").hidden = false;
@@ -179,13 +183,13 @@ function show(id, f) {
 
   const cut = f.cut_off_settlements, part = f.most_stranded_settlements || f.partly_cut_settlements;
   $("#tab-cut").innerHTML = (cut.length ? `<ul class="list">${cut.map((s) => `<li data-lon="${s.lon}" data-lat="${s.lat}">
-      <span>${s.name}<br><small>${s.buildings} buildings · est. ${s.people_est} people</small></span><span class="pill">cut off</span></li>`).join("")}</ul>`
+      <span>${esc(s.name)}<br><small>${s.buildings} buildings · est. ${s.people_est} people</small></span><span class="pill">cut off</span></li>`).join("")}</ul>`
     : "<p>No settlement lost all road links.</p>") +
     (part.length ? `<h4>Most people stranded</h4><ul class="list">${part.map((s) => `<li data-lon="${s.lon}" data-lat="${s.lat}">
-      <span>${s.name}<br><small>${Math.round((s.share_of_buildings_cut_off ?? 0) * 100)}% of ${s.buildings} buildings have no road · est. ${s.people_est_stranded} people${s.lost ? " · lost: " + s.lost : ""}</small></span><span class="pill warn">${Math.round((s.share_of_buildings_cut_off ?? 0) * 100)}%</span></li>`).join("")}</ul>` : "") +
-    `<p><small>A settlement is judged by up to 25 of its own buildings, each snapped to its nearest road. People = buildings × 4.37 (Nepal census 2021 household size). Settlements = OSM places + unnamed building clusters.</small></p>`;
+      <span>${esc(s.name)}<br><small>${Math.round((s.share_of_buildings_cut_off ?? 0) * 100)}% of ${s.buildings} buildings have no road · est. ${s.people_est_stranded} people${s.lost ? " · lost: " + esc(s.lost) : ""}</small></span><span class="pill warn">${Math.round((s.share_of_buildings_cut_off ?? 0) * 100)}%</span></li>`).join("")}</ul>` : "") +
+    `<p><small>A settlement is judged by up to 25 of its own buildings, each snapped to its nearest road. People: ${esc(a.people_estimate_method)}. Settlements = OSM places + unnamed building clusters.</small></p>`;
   $("#tab-bridges").innerHTML = f.damaged_bridges.length ? `<ul class="list">${f.damaged_bridges.map((b) => `<li data-lon="${b.lon}" data-lat="${b.lat}">
-      <span>${b.name}<br><small>${b.osm_id}</small></span><span class="pill ${b.status.startsWith("possibly") ? "warn" : ""}">${b.status}</span></li>`).join("")}</ul>`
+      <span>${esc(b.name)}<br><small>${esc(b.osm_id)}</small></span><span class="pill ${b.status.startsWith("possibly") ? "warn" : ""}">${esc(b.status)}</span></li>`).join("")}</ul>`
     : "<p>No mapped bridge in the impact zone.</p>";
   document.querySelectorAll(".list li").forEach((li) => li.onclick = () => map.flyTo({ center: [+li.dataset.lon, +li.dataset.lat], zoom: 15 }));
 
@@ -232,6 +236,8 @@ function actText(t) {
     : "no trustworthy SIFT alignment: kept ECC";
   if (t.tool === "vision.zoom") return t.parts.map((p) => `${p.part} ${p.impact_ha} ha ${Object.values(p.lines).filter(Boolean).length}/4`).join(", ")
     + (t.strong_parts.length ? ` → strong: ${t.strong_parts.join(", ")} (${Math.round(100 * t.strong_share)}%)` : "");
+  if (t.tool === "nemotron.second_look") return t.error ? `no read (${t.error})`
+    : `${t.cause} (${Math.round(100 * t.confidence)}%): ${t.explanation}`;
   return `${t.scenes.length} later scenes, change ${t.persistence}`;
 }
 function traceText(c) {
@@ -267,16 +273,16 @@ async function loadInspection(id) {
   const cells = [...res.cells].sort((a, b) => (order[a.verdict] - order[b.verdict]) || (!!a.review - !!b.review) || b.priority - a.priority);
   $("#cellList").innerHTML = cells.map((c) => {
     const [cls, label] = VERDICT[c.verdict];
-    const rv = c.review ? `<p class="why">Analyst: <b>${c.review.decision}</b>${c.review.note ? " · " + c.review.note : ""}</p>` : "";
+    const rv = c.review ? `<p class="why">Analyst: <b>${esc(c.review.decision)}</b>${c.review.note ? " · " + esc(c.review.note) : ""}</p>` : "";
     const acts = c.verdict !== "confirmed" && !c.review && state.readonly
       ? `<p class="why">⏸ Waiting for an analyst (read-only on this public demo)</p>`
       : c.verdict !== "confirmed" && !c.review
       ? `<div class="acts"><button class="keep" data-d="keep">Keep: real damage</button><button class="remove" data-d="remove">Remove: not flood</button></div>` : "";
     return `<li data-id="${c.id}" data-lon="${c.lon}" data-lat="${c.lat}">
       <div class="head"><span><b>${c.impact_ha} ha</b> · ${c.buildings_hit} buildings · ${c.road_segments_cut} road segments · ~${fmt(c.people_nearby_est)} people nearby</span><span class="pill ${cls}">${label}</span></div>
-      <p class="why">${c.reason}</p><img src="/runs/${id}/${c.chip}" alt="before, after and colour change for cell ${c.id}">
+      <p class="why">${esc(c.reason)}</p><img src="/runs/${id}/${c.chip}" alt="before, after and colour change for cell ${c.id}">
       ${c.chip_later ? `<img src="/runs/${id}/${c.chip_later}" alt="the same cell weeks later">` : ""}
-      <div class="trace">${traceText(c)}</div>${rv}${acts}</li>`;
+      <div class="trace">${esc(traceText(c))}</div>${rv}${acts}</li>`;
   }).join("");
   $("#cellList").querySelectorAll("li").forEach((li) => {
     li.querySelector(".head").onclick = () => map.flyTo({ center: [+li.dataset.lon, +li.dataset.lat], zoom: 14.5 });
@@ -288,16 +294,16 @@ async function loadInspection(id) {
 }
 function cellCard(id, c, big) {
   const [cls, label] = VERDICT[c.verdict];
-  const rv = c.review ? `<p class="why">Analyst: <b>${c.review.decision}</b>${c.review.note ? " · " + c.review.note : ""}</p>` : "";
+  const rv = c.review ? `<p class="why">Analyst: <b>${esc(c.review.decision)}</b>${c.review.note ? " · " + esc(c.review.note) : ""}</p>` : "";
   const acts = c.verdict !== "confirmed" && !c.review && state.readonly
     ? `<p class="why">⏸ Waiting for an analyst. (Reviews are read-only on this public demo.)</p>`
     : c.verdict !== "confirmed" && !c.review
     ? `<div class="acts"><button class="keep" data-d="keep" data-id="${c.id}">Keep: real damage</button><button class="remove" data-d="remove" data-id="${c.id}">Remove: not flood</button></div>` : "";
   return `<h3>${c.impact_ha} ha · ${c.buildings_hit} buildings · ${c.road_segments_cut} road segments cut <span class="pill ${cls}">${label}</span></h3>
-    <p class="why">${c.reason}</p>
+    <p class="why">${esc(c.reason)}</p>
     <img src="/runs/${id}/${c.chip}" alt="before, after and colour change">
     ${c.chip_later ? `<p class="why">The same cell weeks later:</p><img src="/runs/${id}/${c.chip_later}" alt="the same cell weeks later">` : ""}
-    ${big ? `<div class="trace">${traceText(c)}</div>` : ""}${rv}${acts}`;
+    ${big ? `<div class="trace">${esc(traceText(c))}</div>` : ""}${rv}${acts}`;
 }
 function openCell(id, c) {
   $("#lbBody").innerHTML = cellCard(id, c, true);
@@ -322,7 +328,7 @@ map.on("click", "cells-hit", (e) => {
   if (!c) return;
   const [cls, label] = VERDICT[c.verdict];
   new maplibregl.Popup({ maxWidth: "360px" }).setLngLat(e.lngLat).setHTML(
-    `<b>${c.impact_ha} ha · ${label}</b>${c.review ? " · analyst: " + c.review.decision : ""}<br>${c.reason}
+    `<b>${c.impact_ha} ha · ${label}</b>${c.review ? " · analyst: " + esc(c.review.decision) : ""}<br>${esc(c.reason)}
      <img src="/runs/${state.runId}/${c.chip}" alt="chip"><a href="#" data-open="${c.id}">Open large</a>`).addTo(map);
   setTimeout(() => document.querySelector(`[data-open="${c.id}"]`)?.addEventListener("click", (ev) => { ev.preventDefault(); openCell(state.runId, c); }), 0);
 });
@@ -356,7 +362,7 @@ async function loadProof(id) {
   const lbl = ["reachable", "partly cut", "cut off"];
   const ss = [...p.settlements].sort((a, b) => b.status - a.status || b.people_stranded - a.people_stranded);
   $("#claimsList").innerHTML = ss.slice(0, 40).map((s) => `<li data-lon="${s.lon_e5 / 1e5}" data-lat="${s.lat_e5 / 1e5}">
-    <span>${s.name}<br><small>${s.people_stranded} people stranded · leaf ${short(s.leaf)} · proof ${s.proof.length} hashes</small></span>
+    <span>${esc(s.name)}<br><small>${s.people_stranded} people stranded · leaf ${short(s.leaf)} · proof ${s.proof.length} hashes</small></span>
     <span class="pill ${["mute", "warn", ""][s.status]}">${lbl[s.status]}</span></li>`).join("");
   $("#claimsList").querySelectorAll("li").forEach((li) => li.onclick = () => map.flyTo({ center: [+li.dataset.lon, +li.dataset.lat], zoom: 15 }));
 }
@@ -392,8 +398,21 @@ async function ask(q) {
   wait.remove();
   if (r.error) { addMsg("bot", "Error: " + r.error); return; }
   const ok = !r.unverified.length;
-  addMsg("bot", r.answer, `${ok ? "✓" : "⚠"} ${r.numbers_checked} numbers checked against the map results` +
+  const web = r.web_numbers?.length ? ` · ${r.web_numbers.length} from web reports, not checked against the maps` : "";
+  const msg = addMsg("bot", r.answer, `${ok ? "✓" : "⚠"} ${r.numbers_checked} numbers checked against the map results` + web +
     (ok ? "" : ` · unverified: ${r.unverified.join(", ")}`) + ` · ${r.backend}` + (r.tool_calls?.length ? ` · tools: ${r.tool_calls.join(", ")}` : ""), ok ? "ok" : "bad");
+  if (r.sources?.length) {   // web reports the answer could draw on: a separate, unverified source
+    const box = document.createElement("div"); box.className = "sources";
+    box.appendChild(document.createTextNode("Web reports (unverified): "));
+    r.sources.slice(0, 5).forEach((s, i) => {
+      if (!/^https?:\/\//.test(s.url)) return;
+      const a = document.createElement("a"); a.href = s.url; a.target = "_blank"; a.rel = "noopener noreferrer";
+      a.textContent = s.site + (s.published ? ` (${s.published.slice(0, 10)})` : ""); a.title = s.title;
+      if (i) box.appendChild(document.createTextNode(" · "));
+      box.appendChild(a);
+    });
+    msg.appendChild(box);
+  }
   state.history.push({ role: "user", text: q }, { role: "assistant", text: r.answer });
   runActions(r.actions || []);
 }
@@ -432,11 +451,11 @@ async function trace(lon, lat) {
   $("#traceOut").innerHTML = "<p>Tracing…</p>";
   const r = await fetch(`/api/runs/${state.runId}/trace`, { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ lon, lat }) }).then((r) => r.json());
-  if (r.detail || r.error) { $("#traceOut").innerHTML = `<p>${r.detail || r.error}</p>`; return; }
+  if (r.detail || r.error) { $("#traceOut").innerHTML = `<p>${esc(r.detail || r.error)}</p>`; return; }
   runActions(r.actions);
   $("#traceOut").innerHTML = `<p>Path ${r.path_length_km} km${r.leaves_analysed_area ? " (continues beyond the analysed area)" : ""}.
     Times assume a ${r.assumed_surge_speed_m_per_s} m/s surge: an assumption, not a forecast.</p>
-    <ul class="list">${r.settlements_along_path.map((s) => `<li><span>${s.name}<br><small>${s.buildings} buildings · lowest part ${s.lowest_part_above_river_m} m above river</small></span>
+    <ul class="list">${r.settlements_along_path.map((s) => `<li><span>${esc(s.name)}<br><small>${s.buildings} buildings · lowest part ${s.lowest_part_above_river_m} m above river</small></span>
     <span>${s.km_downstream} km · ~${s.minutes_at_assumed_speed} min</span></li>`).join("") || "<li>No settlement within reach of the path.</li>"}</ul>`;
 }
 

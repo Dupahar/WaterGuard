@@ -19,4 +19,6 @@ chmod 600 /opt/waterguard/.env
 cd /opt/waterguard
 docker build -t waterguard .
 # logs (incl. the inspector's metric lines, Embedded Metric Format) go to CloudWatch /waterguard/app
-docker run -d --name waterguard --restart always -p 80:8000 -v /data:/data --env-file .env \n  --log-driver awslogs --log-opt awslogs-region=ap-south-1 --log-opt awslogs-group=/waterguard/app \n  --log-opt awslogs-create-group=true waterguard
+docker run -d --name waterguard --restart always -p 80:8000 -v /data:/data --env-file .env \
+  --log-driver awslogs --log-opt awslogs-region=ap-south-1 --log-opt awslogs-group=/waterguard/app \
+  --log-opt awslogs-create-group=true waterguard

@@ -45,7 +45,7 @@ with sync_playwright() as p:
     idle(pg, 2500)
     snap(pg, "a_empty", {"preset": box(pg, "#preset"), "run": box(pg, "#runBtn"), "date": box(pg, "#date")})
 
-    pg.select_option("#preset", "85.313,28.139,85.358,28.198|2026-08-25T22")
+    pg.select_option("#preset", "85.313,28.139,85.358,28.198|2026-08-25T22|osm")
     idle(pg, 1500)
     snap(pg, "a_preset", {"run": box(pg, "#runBtn"), "bbox": box(pg, "#bboxTxt")})
 

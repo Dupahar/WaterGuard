@@ -29,15 +29,21 @@ class PlanetaryProvider:
         return self._client
 
     def search(self, collection: str, bbox, start, end, max_items=200) -> list[Scene]:
-        """Cached on disk, so areas already analysed rerun with no network at all."""
-        import hashlib, json, dataclasses
+        """Cached on disk, so areas already analysed rerun with no network at all. A window that has not
+        closed yet (plus two days for ingestion) is not cached: later images are still arriving."""
+        import hashlib, json, dataclasses, os
+        from datetime import datetime, timedelta, timezone
         from ..config import CACHE_DIR
         key = hashlib.sha1(f"{collection}|{[round(v, 5) for v in bbox]}|{start}|{end}".encode()).hexdigest()[:16]
         path = CACHE_DIR / f"stac_{key}.json"
         if path.exists():
             return [Scene(**{**d, "datetime": as_utc(d["datetime"])}) for d in json.loads(path.read_text())]
         scenes = self._search(collection, bbox, start, end, max_items)
-        path.write_text(json.dumps([{**dataclasses.asdict(s), "datetime": s.datetime.isoformat()} for s in scenes]))
+        if end is not None and as_utc(end) + timedelta(days=2) > datetime.now(timezone.utc):
+            return scenes
+        tmp = path.with_suffix(".part")
+        tmp.write_text(json.dumps([{**dataclasses.asdict(s), "datetime": s.datetime.isoformat()} for s in scenes]))
+        os.replace(tmp, path)
         return scenes
 
     def _search(self, collection: str, bbox, start, end, max_items=200) -> list[Scene]:

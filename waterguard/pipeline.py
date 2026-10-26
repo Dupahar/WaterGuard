@@ -8,6 +8,7 @@ so every number in a report can be traced back to a computation in this file.
 import argparse
 import hashlib
 import json
+import os
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,8 +28,17 @@ RUNS_DIR = DATA_DIR / "runs"
 MAX_AREA_KM2 = 1500
 
 
-def run_id(bbox, event) -> str:
-    return hashlib.sha1(f"{[round(v, 4) for v in bbox]}|{as_utc(event):%Y-%m-%dT%H}".encode()).hexdigest()[:10]
+EXPOSURE_MODES = ("osm", "open")   # who is counted: OSM alone, or OSM + open footprints + WorldPop (exposure.py)
+
+
+def default_exposure() -> str:
+    return os.getenv("WATERGUARD_EXPOSURE", "open")
+
+
+def run_id(bbox, event, exposure: str = "osm") -> str:
+    """Area + event hour (+ exposure mode, except OSM-only, so reports made before it existed keep their id)."""
+    key = f"{[round(v, 4) for v in bbox]}|{as_utc(event):%Y-%m-%dT%H}" + ("" if exposure == "osm" else f"|{exposure}")
+    return hashlib.sha1(key.encode()).hexdigest()[:10]
 
 
 def _to_geojson(gdf: gpd.GeoDataFrame, path: Path, cols=None):
@@ -164,15 +174,19 @@ def _apply_veto(D, veto):
     return D
 
 
-def run(bbox, event, out_dir: Path | None = None, progress=lambda msg, pct: None, veto: list | None = None) -> dict:
+def run(bbox, event, out_dir: Path | None = None, progress=lambda msg, pct: None, veto: list | None = None,
+        exposure: str | None = None) -> dict:
     t0 = time.time()
+    exposure = exposure or default_exposure()
+    if exposure not in EXPOSURE_MODES:
+        raise ValueError(f"exposure must be one of {EXPOSURE_MODES}")
     event = as_utc(event)
     bbox = tuple(float(v) for v in bbox)
     grid = Grid.from_bbox(bbox)
     area_km2 = grid.width * grid.height * grid.res ** 2 / 1e6
     if area_km2 > MAX_AREA_KM2:
         raise ValueError(f"Area is {area_km2:.0f} km2; the limit is {MAX_AREA_KM2} km2. Draw a smaller box.")
-    rid = run_id(bbox, event)
+    rid = run_id(bbox, event, exposure)
     out = Path(out_dir or RUNS_DIR / rid)
     out.mkdir(parents=True, exist_ok=True)
     timings = {}
@@ -208,6 +222,13 @@ def run(bbox, event, out_dir: Path | None = None, progress=lambda msg, pct: None
     built = rasterize([(g, 1) for g in blds], out_shape=grid.shape, transform=grid.transform, all_touched=True) > 0 \
         if len(blds) else np.zeros(grid.shape, bool)
     built = cv2.dilate(built.astype("uint8"), np.ones((3, 3), "uint8")) > 0
+    exp_audit = None
+    if exposure == "open":   # counted on the map: + open footprints OSM lacks, people from WorldPop (impact map unchanged)
+        step("open building footprints + WorldPop", 66)
+        from dataclasses import replace
+        from . import exposure as exposure_mod
+        ex = exposure_mod.load(bbox, event.year, osm.buildings)
+        osm, exp_audit = replace(osm, buildings=ex.buildings), ex.audit
 
     step("impact map (OpenCV)", 72)
     D = detect.impact_map(T, S, O, built)
@@ -223,12 +244,16 @@ def run(bbox, event, out_dir: Path | None = None, progress=lambda msg, pct: None
     step("cut-off settlements", 88)
     boundary = gpd.GeoSeries([box(*bbox)], crs=4326).to_crs(grid.crs).iloc[0]
     acc = access.analyse(osm, dmg, impact, grid.crs, boundary)
+    if exp_audit and exp_audit["population"].get("source"):
+        acc["summary"]["people_estimate_method"] = (
+            "WorldPop constrained 100 m population for the event year, shared among the buildings in each cell")
 
     step("writing outputs", 95)
     grid.save(out / "impact.tif", D["classes"], nodata=255)
     _to_geojson(impact.assign(kind="flood/debris impact"), out / "impact.geojson")
     _to_geojson(dmg["buildings"][dmg["buildings"]["status"] != "not mapped as affected"],
-                out / "buildings_affected.geojson", ["osm_id", "name", "building", "status"])
+                out / "buildings_affected.geojson", ["osm_id", "name", "building", "status"]
+                + (["source", "people"] if "source" in dmg["buildings"] else []))
     _to_geojson(dmg["bridges"], out / "bridges.geojson", ["osm_id", "name", "highway", "status"])
     _to_geojson(dmg["health"], out / "health.geojson", ["osm_id", "name", "amenity", "healthcare", "status"])
     if len(dmg["roads_cut"]):
@@ -325,10 +350,11 @@ def run(bbox, event, out_dir: Path | None = None, progress=lambda msg, pct: None
             "sentinel2": O.scenes if O is not None else [],
             "dem": "Copernicus DEM GLO-30 (via Microsoft Planetary Computer)",
             "osm": osm.audit,
+            "exposure": exp_audit,
         },
         "method": {
             "hand_max_m": detect.HAND_MAX_M, "ndvi_drop": detect.NDVI_DROP, "ndwi_rise": detect.NDWI_RISE,
-            "sar_z_min": detect.Z_MIN, "buffer_possible_m": damage.BUFFER_M,
+            "sar_z_min": detect.Z_MIN, "buffer_possible_m": damage.BUFFER_M, "exposure": exposure,
         },
         "overlays": overlays,
         "analyst_review": {"removed_cells": [v["id"] for v in veto]} if veto else None,
@@ -346,8 +372,11 @@ def main():
     ap.add_argument("--bbox", nargs=4, type=float, required=True, metavar=("W", "S", "E", "N"))
     ap.add_argument("--date", required=True, help="event date/time, e.g. 2026-08-26 or 2026-08-25T22:00Z")
     ap.add_argument("--out")
+    ap.add_argument("--exposure", choices=EXPOSURE_MODES, help="osm = OSM buildings x household size; open = + open "
+                    "building footprints + WorldPop (default: WATERGUARD_EXPOSURE or open)")
     a = ap.parse_args()
-    f = run(a.bbox, a.date, Path(a.out) if a.out else None, progress=lambda m, p: print(f"[{p:3d}%] {m}", flush=True))
+    f = run(a.bbox, a.date, Path(a.out) if a.out else None, progress=lambda m, p: print(f"[{p:3d}%] {m}", flush=True),
+            exposure=a.exposure)
     print(json.dumps({k: f[k] for k in ("run_id", "impact", "damage", "access", "runtime_s")}, indent=1))
 
 

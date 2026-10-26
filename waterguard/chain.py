@@ -194,9 +194,10 @@ class Ledger:
         r = self.registry.functions.report(ledger.report_key(run_id)).call()
         bbox = [v / 1e5 for v in r[2]]
         event = datetime.fromtimestamp(r[3], timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-        if make_id(bbox, event) != run_id:
+        mode = next((m for m in ("osm", "open") if make_id(bbox, event, m) == run_id), None)
+        if mode is None:
             raise RuntimeError("on-chain area/time do not map back to this run id")
-        return run(bbox, event)
+        return run(bbox, event, exposure=mode)
 
     def confirm(self, run_id: str, rerun: bool = False) -> dict:
         """Run by a *different* party on its own machine after re-running the pipeline itself."""

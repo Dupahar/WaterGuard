@@ -1,22 +1,34 @@
 // WaterGuard product film: a user's walk through the real dashboard (captured states, scripts/capture_ui.py)
 // framed by motion graphics. One grid (headline column left, window/graphic right), one type system,
 // one accent. Every hit is cued to a narration word (timeline.json) and every number is real (product.json).
-import React, {useEffect, useState} from 'react';
+import React, {createContext, useContext, useEffect, useState} from 'react';
 import {AbsoluteFill, Audio, Img, staticFile, useCurrentFrame} from 'remotion';
 import {C, clamp, ease, easeOut, F, FPS, H, lerp, prog, W} from '../lib';
 import {fmt, Rise} from '../ui';
-import {at, Box, Cv, data, loadData, PData, PEND, sEnd, sStart, short} from './plib';
+import {at, Box, Cv, data, loadData, Nem, PData, PEND, sEnd, sStart, short} from './plib';
 import {boxCenter, CamKey, CurKey, FH, Focus, FRAME, Screen, StateKey} from './Screen';
 
 const COL = {x: 96, w: 360};
-// [narration block, chapter label, title] in playing order (blocks 13 and 14 were added after 8)
+const NV = '#76b900';   // NVIDIA green, for what runs on Nemotron
+// [narration block, chapter label, title] in playing order (blocks 13, 15 and 14 were added after 8)
 const CHAPTERS: [number, string, string][] = [
 	[1, '01', 'The flood'], [2, '02', 'The problem'], [3, '03', 'Map the flood'], [4, '04', 'Who is cut off'],
 	[5, '05', 'Ask the copilot'], [6, '06', 'On paper'], [7, '07', 'Where next'], [8, '08', 'Inspector agent'],
-	[13, '09', 'How it looks'], [14, '10', 'Tested · on AWS'],
-	[9, '11', 'Two fingerprints'], [10, '12', 'Anyone can re-run it'], [11, '13', 'Relief on evidence'], [12, '14', 'WaterGuard'],
+	[13, '09', 'How it looks'], [15, '10', 'Nemotron on Nebius'], [14, '11', 'Tested · where it runs'],
+	[9, '12', 'Two fingerprints'], [10, '13', 'Anyone can re-run it'], [11, '14', 'Relief on evidence'], [12, '15', 'WaterGuard'],
 ];
 const chapter = (n: number) => CHAPTERS.find((c) => c[0] === n)!;
+/** a cut of the film (Short.tsx) renumbers the chapters it keeps */
+export const ChapterLabels = createContext<Record<number, string> | null>(null);
+const useChapter = () => {
+	const L = useContext(ChapterLabels);
+	return (n: number): [number, string, string] => {
+		const c = chapter(n);
+		return L ? [c[0], L[n] ?? c[1], c[2]] : c;
+	};
+};
+/** the HUD's clock when the film is replayed in a cut: its own time, length and chapter marks */
+export type Clock = {t: number; end: number; marks: {n: number; at: number}[]};
 /** the block that plays after block n */
 const nextBlock = (n: number) => CHAPTERS[CHAPTERS.indexOf(chapter(n)) + 1][0];
 
@@ -29,9 +41,10 @@ const vis = (t: number, a: number, b: number, fi = 0.6, fo = 0.6) => Math.min(ea
 
 // ---------------- headline column ----------------
 const Side: React.FC<{t: number; n: number; from: number; to: number; title: string; sub?: string; children?: React.ReactNode}> = ({t, n, from, to, title, sub, children}) => {
+	const label = useChapter();
 	const k = vis(t, from, to, 0.7, 0.5);
 	if (k <= 0) return null;
-	const ch = chapter(n);
+	const ch = label(n);
 	return (
 		<div style={{position: 'absolute', left: COL.x, top: FRAME.y + 6, width: COL.w, opacity: k}}>
 			<div style={{display: 'flex', alignItems: 'center', gap: 14, marginBottom: 26}}>
@@ -71,21 +84,26 @@ const Big: React.FC<{t: number; a: number; v: number; dec?: number; label: strin
 };
 
 // ---------------- HUD (same frame on every shot) ----------------
-const Hud: React.FC<{t: number}> = ({t}) => {
-	const cur = [...CHAPTERS].reverse().find((c) => t >= sStart(c[0]) - 1.2) ?? CHAPTERS[0];
+export const Hud: React.FC<{t: number; clock?: Clock}> = ({t, clock}) => {
+	const ch = useChapter();
+	const L = useContext(ChapterLabels);
+	const kept = L ? CHAPTERS.filter((c) => c[0] in L) : CHAPTERS;
+	const cur = ch(([...kept].reverse().find((c) => t >= sStart(c[0]) - 1.2) ?? kept[0])[0]);
+	const T = clock ? clock.t : t, END_ = clock ? clock.end : PEND;
+	const marks = clock ? clock.marks : CHAPTERS.map((c) => ({n: c[0], at: sStart(c[0])}));
 	const st: React.CSSProperties = {position: 'absolute', fontFamily: F.mono, fontSize: 14, letterSpacing: '0.1em', color: 'rgba(255,255,255,.45)', textTransform: 'uppercase'};
-	const mm = Math.floor(t / 60), ss = Math.floor(t % 60).toString().padStart(2, '0');
+	const mm = Math.floor(T / 60), ss = Math.floor(T % 60).toString().padStart(2, '0');
 	return (
-		<div style={{position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 90, opacity: clamp(t / 1.2)}}>
+		<div style={{position: 'absolute', inset: 0, pointerEvents: 'none', zIndex: 90, opacity: clamp(T / 1.2)}}>
 			<div style={{...st, left: 48, top: 40}}><span style={{color: C.orange}}>●</span>&nbsp; WaterGuard</div>
 			<div style={{...st, right: 48, top: 40}}>{cur[1]} · {cur[2]}</div>
 			<div style={{...st, left: 48, bottom: 44}}>Trishuli valley · Nepal · 26 Aug 2026</div>
 			<div style={{...st, right: 48, bottom: 44}}>{String(mm).padStart(2, '0')}:{ss}</div>
 			<div style={{position: 'absolute', left: 48, right: 48, bottom: 32, height: 1, background: 'rgba(255,255,255,.12)'}} />
-			<div style={{position: 'absolute', left: 48, bottom: 32, height: 2, marginBottom: -0.5, width: (W - 96) * clamp(t / PEND), background: 'rgba(255,255,255,.7)'}} />
-			{CHAPTERS.map((c) => {
-				const x = 48 + (W - 96) * (sStart(c[0]) / PEND);
-				return <div key={c[0]} style={{position: 'absolute', left: x - 3, bottom: 29, width: 7, height: 7, transform: 'rotate(45deg)', border: '1px solid rgba(255,255,255,.4)', background: t >= sStart(c[0]) ? 'rgba(255,255,255,.7)' : 'transparent'}} />;
+			<div style={{position: 'absolute', left: 48, bottom: 32, height: 2, marginBottom: -0.5, width: (W - 96) * clamp(T / END_), background: 'rgba(255,255,255,.7)'}} />
+			{marks.map((c) => {
+				const x = 48 + (W - 96) * (c.at / END_);
+				return <div key={c.n} style={{position: 'absolute', left: x - 3, bottom: 29, width: 7, height: 7, transform: 'rotate(45deg)', border: '1px solid rgba(255,255,255,.4)', background: T >= c.at ? 'rgba(255,255,255,.7)' : 'transparent'}} />;
 			})}
 		</div>
 	);
@@ -610,6 +628,86 @@ const CvLook: React.FC<{t: number; cv: Cv}> = ({t, cv}) => {
 	);
 };
 
+// ---------------- Nemotron on Nebius: a real planner trace, the second look, the copilot (scripts/export_nemotron.py) ----------------
+const typed = (t: number, a: number, text: string, cps = 90) => text.slice(0, Math.max(0, Math.floor((t - a) * cps)));
+/** shorten at a word boundary */
+const clip = (s: string, n: number) => (s.length <= n ? s : s.slice(0, s.lastIndexOf(' ', n)) + '…');
+
+const NemotronLook: React.FC<{t: number; nem: Nem}> = ({t, nem}) => {
+	const a = sStart(15) - 0.9, b = sEnd(15) + 1.0;
+	const k = vis(t, a, b, 0.7, 0.7);
+	if (k <= 0) return null;
+	const q = (w: string, nth = 0, d = 0.5) => easeOut(clamp((t - at(15, w, nth)) / d));
+	const X = 560, Y = FRAME.y + 4, PW = 1280;
+	const tr = nem.planner.trace;
+	const L0 = tr[0].lines!;
+	const ask = tr.find((x) => x.step === 'decide' && x.action === 'second_look')!;
+	const read = tr.find((x) => x.tool === 'nemotron.second_look')!;
+	const last = tr[tr.length - 1];
+	const wanted = (last.reason ?? '').match(/^model wanted to confirm \((.*)\) but (only \d of 4 lines agree)/s);
+	const chat = 1 - ease(clamp((t - at(15, 'copilot') + 0.4) / 0.6));
+	const cop = easeOut(clamp((t - at(15, 'copilot') + 0.1) / 0.7));
+	const web = nem.copilot.web, sum = nem.copilot.summary;
+	const bullets = web.answer.split('\n').filter((l) => l.trim().startsWith('- **') && !/linkedin/i.test(l)).slice(0, 3)
+		.map((l) => l.replace(/^\s*- \*\*/, '').replace(/\*\*/g, '').replace(/【[^】]*】/g, '').trim());
+	const row: React.CSSProperties = {display: 'flex', gap: 18, alignItems: 'flex-start', marginBottom: 16};
+	const tag = (s: string, col: string) => <div style={{fontFamily: F.mono, fontSize: 14, color: col, width: 150, flex: 'none', paddingTop: 3}}>{s}</div>;
+	return (
+		<AbsoluteFill style={{opacity: k}}>
+			<Side t={t} n={15} from={a} to={b} title="Nemotron on Nebius" sub="Three NVIDIA models through Token Factory. The evidence bar stays in code.">
+				<Item t={t} a={at(15, 'Ultra')} dot={NV}>Nemotron 3 Ultra · plans</Item>
+				<Item t={t} a={at(15, 'second')} dot={NV}>Nemotron 3.5 Super VL · second look</Item>
+				<Item t={t} a={at(15, 'copilot')} dot={NV}>Nemotron 3 Super · copilot</Item>
+			</Side>
+			{/* the planner's live trace */}
+			<div style={{position: 'absolute', left: X, top: Y, width: PW, opacity: chat * q('Ultra', 0, 0.7)}}>
+				<Mono size={15} color={NV}>{nem.planner.model} · {nem.planner.area}, cell {nem.planner.cell} · a real trace</Mono>
+				<div style={{marginTop: 22, padding: '22px 26px', borderRadius: 16, background: 'rgba(255,255,255,.035)', border: '1px solid rgba(255,255,255,.1)'}}>
+					<div style={{...row, opacity: q('plans')}}>{tag('perceive', '#7fd6ff')}<Pills L={L0} size={14} /></div>
+					<div style={{...row, opacity: q('second')}}>{tag('decide', '#cbb2ff')}
+						<div style={{fontFamily: F.sans, fontSize: 21, color: '#fff'}}><b style={{color: NV}}>second_look</b>
+							<div style={{fontSize: 16, color: 'rgba(255,255,255,.62)', marginTop: 4, lineHeight: 1.4}}>"{typed(t, at(15, 'second') + 0.3, clip(ask.reason ?? '', 190))}"</div></div></div>
+					<div style={{...row, opacity: q('image')}}>{tag('act', '#7fd6ff')}
+						{nem.planner.chip && <Img src={staticFile(`data/nemotron/${nem.planner.chip}`)} style={{width: 720, borderRadius: 8, flex: 'none'}} />}
+						<div style={{fontFamily: F.mono, fontSize: 15, color: '#fff', lineHeight: 1.5}}>
+							<div style={{color: NV}}>Nemotron VL reads:</div>
+							<div style={{opacity: q('debris')}}>cause: <b>{read.cause}</b> · {Math.round(100 * (read.confidence ?? 0))}%</div>
+							<div style={{opacity: q('debris'), color: 'rgba(255,255,255,.62)', fontFamily: F.sans, fontSize: 15, marginTop: 4}}>{typed(t, at(15, 'debris'), clip(read.explanation ?? '', 230), 110)}</div>
+						</div></div>
+					<div style={{...row, marginBottom: 0, opacity: q('confirm')}}>{tag('decide', '#cbb2ff')}
+						<div style={{fontFamily: F.sans, fontSize: 21, color: '#fff', position: 'relative'}}>
+							<span style={{textDecoration: t > at(15, 'overrule') ? 'line-through' : 'none', color: t > at(15, 'overrule') ? 'rgba(255,255,255,.4)' : '#fff'}}><b>confirm</b> (the model's choice)</span>
+							<div style={{marginTop: 10, display: 'flex', gap: 14, alignItems: 'center', opacity: q('overrule'), transform: `scale(${0.92 + 0.08 * q('overrule')})`, transformOrigin: '0 50%'}}>
+								<div style={{padding: '6px 12px', borderRadius: 8, border: `2px solid ${C.red}`, fontFamily: F.mono, fontSize: 15, color: C.red}}>GUARD RAIL · {wanted ? wanted[2] : 'evidence bar not met'}</div>
+								<div style={{opacity: q('person'), padding: '6px 12px', borderRadius: 8, border: `2px solid ${C.amber}`, fontFamily: F.mono, fontSize: 15, color: C.amber}}>→ ask_human: an analyst decides</div>
+							</div></div></div>
+				</div>
+			</div>
+			{/* the copilot on Nemotron Super */}
+			<div style={{position: 'absolute', left: X, top: Y, width: PW, opacity: cop}}>
+				<Mono size={15} color={NV}>{sum.backend} · {sum.median_seconds} s median answer</Mono>
+				<div style={{display: 'flex', gap: 30, marginTop: 22}}>
+					<div style={{flex: 1, padding: '22px 26px', borderRadius: 16, background: 'rgba(255,255,255,.035)', border: '1px solid rgba(255,255,255,.1)'}}>
+						<div style={{marginLeft: 'auto', width: 'fit-content', padding: '10px 16px', borderRadius: 14, background: '#1e5bd8', fontFamily: F.sans, fontSize: 20, color: '#fff'}}>{web.q}</div>
+						<div style={{marginTop: 18, fontFamily: F.sans, fontSize: 18, color: '#fff', lineHeight: 1.5}}>
+							<div style={{fontWeight: 700, marginBottom: 8}}>Rescue and relief: news reports (not verified by WaterGuard)</div>
+							{bullets.map((l, i) => <div key={i} style={{opacity: easeOut(clamp((t - at(15, 'copilot') - 0.6 - 0.5 * i) / 0.5)), marginBottom: 8}}>• {l.length > 170 ? l.slice(0, 168) + '…' : l}</div>)}
+						</div>
+						<div style={{marginTop: 12, paddingTop: 10, borderTop: '1px dashed rgba(255,255,255,.25)', fontFamily: F.mono, fontSize: 13, color: 'rgba(255,255,255,.55)', opacity: q('news')}}>
+							{web.web_numbers.length} numbers from web reports, not checked against the maps · sources: {web.sources.slice(0, 4).map((u) => new URL(u).hostname.replace('www.', '')).join(' · ')}
+						</div>
+					</div>
+					<div style={{width: 300, opacity: q('15')}}>
+						<div style={{fontFamily: F.sans, fontWeight: 800, fontSize: 96, color: C.green, lineHeight: 1}}>{sum.answers_fully_verified}/{sum.questions}</div>
+						<Mono size={15} color="#fff" style={{marginTop: 10}}>answers with every number checked against the maps</Mono>
+						<Mono size={14} style={{marginTop: 10}}>{sum.numbers_total} numbers · English + नेपाली · 0 retries</Mono>
+					</div>
+				</div>
+			</div>
+		</AbsoluteFill>
+	);
+};
+
 // ---------------- 10 tested the hard way, and where it runs ----------------
 const Tested: React.FC<{t: number; cv: Cv}> = ({t, cv}) => {
 	const a = sStart(14) - 0.9, b = sEnd(14) + 1.0;
@@ -626,22 +724,22 @@ const Tested: React.FC<{t: number; cv: Cv}> = ({t, cv}) => {
 	const hi3 = q('alone');
 	const falseK = q('false');
 	// boxes in the 1800 x 1050 architecture figure (docs/figures/architecture.png)
-	const AS = 1280 / 1800;
-	const hl: [string, number[]][] = [['Docker', [740, 128, 995, 737]], ['behind', [450, 140, 250, 78]], ['Bedrock', [450, 478, 250, 124]], ['decision', [450, 612, 250, 124]]];
+	// boxes in the 1800 x 1130 architecture figure (docs/diagrams/architecture.html)
+	const AW = 1180, AH = 1130, AS = AW / 1800;
+	const hl: [string, number[]][] = [['container', [740, 140, 995, 725]], ['models', [40, 925, 1340, 138]], ['decision', [450, 612, 250, 124]]];
 	const cur = [...hl].reverse().find(([w]) => t >= at(14, w) - 0.1);
 	return (
 		<AbsoluteFill style={{opacity: k}}>
 			<Side t={t} n={14} from={a} to={b} title={arch > 0.5 ? 'Where it runs' : 'Tested the hard way'}
-				sub={arch > 0.5 ? 'One container on AWS, ap-south-1.' : `Held-out areas, ${R(0, 'agent').cells} cells. After images shifted by a known amount.`}>
+				sub={arch > 0.5 ? 'One container on AWS; models on Nebius Token Factory.' : `Held-out areas, ${R(0, 'agent').cells} cells. After images shifted by a known amount.`}>
 				<div style={{opacity: falseK * (1 - arch), transform: `scale(${0.9 + 0.1 * falseK})`, transformOrigin: '0 50%', display: 'inline-block', padding: '16px 22px', borderRadius: 16, border: `3px solid ${C.green}`, background: C.green + '18'}}>
 					<div style={{fontFamily: F.sans, fontWeight: 800, fontSize: 54, color: C.green, lineHeight: 1}}>{cv.robustness.reduce((n, r) => n + r.false_confirmations, 0)}</div>
 					<Mono size={14} color="#fff" style={{marginTop: 6}}>false confirmations · any shift</Mono>
 				</div>
 				{arch > 0.5 && (
 					<>
-						<Item t={t} a={at(14, 'Docker')} dot={C.orange}>EC2 · Docker container</Item>
-						<Item t={t} a={at(14, 'behind')} dot={C.orange}>CloudFront · the only way in</Item>
-						<Item t={t} a={at(14, 'Bedrock')} dot={C.orange}>Amazon Bedrock · copilot</Item>
+						<Item t={t} a={at(14, 'container')} dot={C.orange}>EC2 · Docker, behind CloudFront</Item>
+						<Item t={t} a={at(14, 'models')} dot={NV}>NVIDIA Nemotron · Nebius Token Factory</Item>
 						<Item t={t} a={at(14, 'decision')} dot={C.orange}>CloudWatch · agent metrics</Item>
 					</>
 				)}
@@ -677,14 +775,14 @@ const Tested: React.FC<{t: number; cv: Cv}> = ({t, cv}) => {
 					);
 				})}
 			</div>
-			<div style={{position: 'absolute', left: X, top: Y + 10, width: 1280, height: 1050 * AS, opacity: arch, transform: `scale(${0.97 + 0.03 * arch})`, borderRadius: 14, overflow: 'hidden',
+			<div style={{position: 'absolute', left: X, top: Y + 10, width: AW, height: AH * AS, opacity: arch, transform: `scale(${0.97 + 0.03 * arch})`, borderRadius: 14, overflow: 'hidden',
 				boxShadow: '0 30px 80px rgba(0,0,0,.55), 0 0 0 1px rgba(255,255,255,.08)'}}>
 				<Img src={staticFile('data/cv/architecture.png')} style={{width: '100%', height: '100%'}} />
 				{hl.map(([w, [x, y, bw, bh]]) => {
 					const on = easeOut(clamp((t - at(14, w) + 0.1) / 0.4));
 					const live = cur && cur[0] === w;
 					return <div key={w} style={{position: 'absolute', left: x * AS - 4, top: y * AS - 4, width: bw * AS + 8, height: bh * AS + 8, borderRadius: 12,
-						border: `3px solid ${C.orange}`, opacity: on * (live ? 1 : 0.35), boxShadow: live ? `0 0 24px ${C.orange}` : 'none'}} />;
+						border: `3px solid ${w === 'models' ? NV : C.orange}`, opacity: on * (live ? 1 : 0.35), boxShadow: live ? `0 0 24px ${w === 'models' ? NV : C.orange}` : 'none'}} />;
 				})}
 			</div>
 		</AbsoluteFill>
@@ -796,6 +894,7 @@ const Relief: React.FC<{t: number; p: PData}> = ({t, p}) => {
 
 // ---------------- 12 close ----------------
 const Close: React.FC<{t: number; p: PData}> = ({t, p}) => {
+	const label = useChapter();
 	const a = sStart(12) - 0.9;
 	const k = vis(t, a, PEND + 5, 0.8, 0.8);
 	if (k <= 0) return null;
@@ -805,7 +904,7 @@ const Close: React.FC<{t: number; p: PData}> = ({t, p}) => {
 	return (
 		<AbsoluteFill style={{opacity: k}}>
 			<div style={{position: 'absolute', left: COL.x, top: FRAME.y + 6, opacity: stats}}>
-				<Mono color={C.orange}>{chapter(12)[1]} · Checked against the official EU damage maps · held-out areas</Mono>
+				<Mono color={C.orange}>{label(12)[1]} · Checked against the official EU damage maps · held-out areas</Mono>
 				<div style={{display: 'flex', gap: 120, marginTop: 50}}>
 					{ho.map((v, i) => {
 						const s = at(12, '0', i);
@@ -855,13 +954,12 @@ const Close: React.FC<{t: number; p: PData}> = ({t, p}) => {
 	);
 };
 
-export const Product: React.FC = () => {
+/** every visual of the film at film time t (no audio); hud=false when the caller draws its own */
+export const Stage: React.FC<{t: number; hud?: boolean}> = ({t, hud = true}) => {
 	const [d, setD] = useState(data());
 	useEffect(() => {
 		if (!d) loadData().then(setD);
 	}, [d]);
-	const frame = useCurrentFrame();
-	const t = frame / FPS;
 	return (
 		<AbsoluteFill style={{background: C.ink, fontFamily: F.sans, overflow: 'hidden'}}>
 			<AbsoluteFill style={{backgroundImage: 'radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px)', backgroundSize: '36px 36px', opacity: 0.6}} />
@@ -870,14 +968,24 @@ export const Product: React.FC = () => {
 					<Flood t={t} />
 					<Problem t={t} />
 					<Walk t={t} p={d.p} />
-						<CvLook t={t} cv={d.cv} />
-						<Tested t={t} cv={d.cv} />
+					<CvLook t={t} cv={d.cv} />
+					<NemotronLook t={t} nem={d.nem} />
+					<Tested t={t} cv={d.cv} />
 					<Rerun t={t} p={d.p} />
 					<Relief t={t} p={d.p} />
 					<Close t={t} p={d.p} />
 				</>
 			)}
-			<Hud t={t} />
+			{hud && <Hud t={t} />}
+		</AbsoluteFill>
+	);
+};
+
+export const Product: React.FC = () => {
+	const t = useCurrentFrame() / FPS;
+	return (
+		<AbsoluteFill>
+			<Stage t={t} />
 			<Audio src={staticFile('audio/product_mix.wav')} />
 		</AbsoluteFill>
 	);

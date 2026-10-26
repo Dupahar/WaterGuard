@@ -165,14 +165,34 @@ area + date
 | `waterguard/validate.py` | EMSR927 comparison and false-alarm tests (the only code that reads EMS data) |
 | `waterguard/server.py`, `web/` | Dashboard (FastAPI + MapLibre), in-browser proof check (`web/proof.js`) |
 
+## 🏘️ Who is counted: open building footprints and WorldPop
+
+OpenStreetMap is patchy in rural South Asia, so a cut-off analysis on OSM alone misses hamlets, and "people" used to be buildings × an average household size. New runs add what OSM lacks (`waterguard/exposure.py`):
+
+- **Buildings:** Google Open Buildings v3 + Microsoft Building Footprints, combined by VIDA and published as GeoParquet by country. The country file is never downloaded whole: its row groups carry bounding boxes, and only those over the area are read. Footprints that overlap an OSM building are dropped (OSM keeps priority: names, building types).
+- **People:** the WorldPop constrained 100 m population for the event year. Each cell's people are shared among the buildings in it; people in a cell with no footprint go to the nearest building within 250 m (the two layers' settlement masks differ); anything further is reported, not guessed.
+- **The impact map does not change**, so the EMS scores above still hold. The exposure mode is part of the run id, so a report made with OSM alone still re-runs to the same result (and its ledger anchor still verifies).
+
+Syapru Besi (AOI01), same flood map:
+
+| | OSM only | + open footprints + WorldPop |
+|---|---|---|
+| Buildings mapped | 1,269 | **1,876** (+484 Google, +123 Microsoft) |
+| Buildings likely hit | 225 | **373** |
+| People with no road left (est.) | 1,452 | **848** |
+| Syabru Bensi, people (est.) | 1,765 | **1,185** |
+
+Half again as many buildings, and fewer people: "every building × 4.37" counted lodges and sheds as households, while WorldPop is calibrated to the census. 98.8 % of WorldPop's people in the area land on a building. `--exposure osm|open` (or `WATERGUARD_EXPOSURE`) picks the mode; the dashboard's original four examples are the published OSM-only runs.
+
 ## 💬 The copilot that can't make things up
 
 Ask it *"Which villages are cut off?"*, *"What about Syabru Bensi?"* or *"कुन कुन पुल भत्किए?"* and it answers, or writes a short situation report, in English or Nepali.
 
-- 🙅 **It has no data of its own.** It can only call seven read-only tools over the run's results: overview, cut-off list, settlement status, damaged bridges, health facilities, the flood-path tracer and the report's ledger proof.
+- 🙅 **It has no data of its own.** It can only call seven read-only tools over the run's results: overview, cut-off list, settlement status, damaged bridges, health facilities, the flood-path tracer and the report's ledger proof (plus, optionally, web reports: below).
 - 🔢 **Every number gets fact-checked.** Each number in a draft (ASCII or Devanagari digits) must appear in a tool result from that conversation. If one doesn't, the model gets one retry with the offenders listed. Still wrong? Those numbers become `[unverified]` and the UI shows a warning. Every answer ends with "✓ N numbers checked".
 - 🗺️ **It drives the map.** Answers fly to the named place, mark bridges and draw flood paths.
 - 📄 **The one-page report is template-based**, so its numbers are exactly the pipeline's.
+- 📰 **What the maps can't know, from the web.** With `TAVILY_API_KEY` set, it can look up news and agency reports published after the event (roads reopened, relief operations, reported casualties) through Tavily. Those are a separate source: each fact is attributed to its site, numbers found only there are reported as "from web reports, not checked against the maps", the sources are listed as links, and results are cached so an answer can be traced to what was read. Social media is excluded, and a result must name the area and be about the disaster (search relevance alone lets unrelated stories through).
 
 ## 🔎 An inspector agent that looks twice
 
@@ -279,8 +299,28 @@ What a fingerprint does **not** prove: that the satellite analysis is right. It 
 | Sentinel-2 L2A | Change detection where clear; true-colour layers on the dashboard |
 | Copernicus DEM GLO-30 | HAND, slope, layover/shadow, flow paths |
 | OpenStreetMap before the event (ohsome API) | Buildings, roads, bridges, settlements, health facilities |
+| Google Open Buildings v3 + Microsoft Building Footprints (combined by VIDA) | Buildings OSM lacks (footprints from imagery up to 2023, so pre-event) |
+| WorldPop constrained 100 m population, event year (R2025A) | People per building and per settlement |
 
-**Never used as inputs:** Copernicus EMS, UNOSAT or any other damage maps, or OSM edits made after the event. Every run's OSM snapshot is taken 24 h before the event and audited, and the run fails if any feature was edited later. EMS maps are read **only** by `waterguard/validate.py`, which the pipeline never imports. No training dataset is used. Population is estimated as buildings × 4.37 (Nepal 2021 census average household size), and that assumption is stated wherever the number appears. Dashboard basemaps (Esri) are for display only.
+**Never used as inputs:** Copernicus EMS, UNOSAT or any other damage maps, or OSM edits made after the event. Every run's OSM snapshot is taken 24 h before the event and audited, and the run fails if any feature was edited later. EMS maps are read **only** by `waterguard/validate.py`, which the pipeline never imports. No training dataset is used. Population comes from WorldPop (or, for runs made with OSM alone, buildings × 4.37, the Nepal 2021 census household size) and is labelled an estimate wherever it appears. Building footprints and population never change the impact map, only what is counted on it. **Web reports** (news, agencies) are shown only in copilot answers, attributed to their site; they never feed the map, the numbers or the ledger. Dashboard basemaps (Esri) are for display only.
+
+## 🧰 Known issues
+
+An independent read-only review of the pipeline, server and deployment (October 2026) confirmed the data rules above (EMS is read only by `validate.py`; the OSM snapshot is pre-event and audited) and found problems. Fixed:
+
+- Text from OpenStreetMap, analysts or a model is now escaped before it goes into the dashboard's HTML.
+- The public server checks the area and the date, bounds its queue, limits question length, caps web searches per hour and does not let visitors pick the model planner (`WATERGUARD_ALLOW_LLM_PLANNER`).
+- A satellite search whose time window is still open (plus two days for ingestion) is no longer cached, so a run made soon after a flood does not freeze an incomplete image list.
+- Event times with a time-zone offset are converted to UTC.
+- `deploy/user-data.sh` started the container with a broken line continuation, so a fresh deploy failed.
+
+Still open (they change the published numbers, so they need re-validation first):
+
+- **A settlement that is itself a destination** (a town, or one with a health post) can be "partly cut" but never "cut off": it always reaches itself. A town whose exits are all destroyed can show 0 people stranded.
+- **Crossings of an impacted river reach** count as cut even when the bridge itself is fine, because the wetted channel and the lower-confidence riverbed are part of the impact geometry.
+- **Sentinel-1 slices** are grouped per track rather than per pass date, and the pre-event stack is counted in scenes, not valid looks per pixel.
+- **Re-running a reviewed report** writes into the live run folder and runs inside the request; it should build in a temporary folder and swap atomically, as a background job.
+- Radar smoothing fills layover/shadow pixels from their neighbours, and cache files are not all written atomically.
 
 ## 🎬 The film
 
