@@ -340,7 +340,7 @@ const Walk: React.FC<{t: number; p: PData}> = ({t, p}) => {
 			<Focus b={B('b_popup', 'popup')} cam={c} k={vis(t, at(4, 'still') - 0.5, at(4, 'Two') - 0.2)} label="64 % of houses have no road" />
 			<Focus b={B('c_ask2', 'chat')} cam={c} k={vis(t, at(5, 'shows') - 0.1, sEnd(5) + 1.2)} color={C.green} pad={2} label="every number checked against the maps" />
 			<Focus b={B('d_trace', 'out')} cam={c} k={vis(t, at(7, 'lists'), sEnd(7) + 0.9)} label="settlements in its way" />
-			<Focus b={B('f_cell_review', 'keep')} cam={c} k={vis(t, at(8, 'waits'), sEnd(8) + 1.0)} color={C.green} label="the analyst decides" />
+			<Focus b={B('f_cell_review', 'keep')} cam={c} k={vis(t, at(8, 'Everything') + 0.3, sEnd(8) + 1.0)} color={C.green} label="the analyst decides" below />
 			<Focus b={B('g_verified', 'log')} cam={c} k={vis(t, at(9, 'blockchain') - 0.2, OUT - 0.6)} color={C.green} label="checked in your browser" />
 		</>
 	);

@@ -133,7 +133,7 @@ export const Screen: React.FC<{
 };
 
 /** highlight ring around a css-px box, drawn in screen space */
-export const Focus: React.FC<{b: Box | null | undefined; cam: {c: [number, number]; z: number}; k: number; color?: string; pad?: number; label?: string}> = ({b, cam, k, color = C.orange, pad = 6, label}) => {
+export const Focus: React.FC<{b: Box | null | undefined; cam: {c: [number, number]; z: number}; k: number; color?: string; pad?: number; label?: string; below?: boolean}> = ({b, cam, k, color = C.orange, pad = 6, label, below}) => {
 	if (!b || k <= 0) return null;
 	const [x0, y0] = toScreen([b[0] - pad, b[1] - pad], cam);
 	const [x1, y1] = toScreen([b[0] + b[2] + pad, b[1] + b[3] + pad], cam);
@@ -143,7 +143,7 @@ export const Focus: React.FC<{b: Box | null | undefined; cam: {c: [number, numbe
 			<div style={{position: 'absolute', left: x0, top: y0, width: x1 - x0, height: y1 - y0, borderRadius: 12, border: `3px solid ${color}`,
 				boxShadow: `0 0 0 ${8 * (1 - q)}px ${color}33, 0 0 30px ${color}55`, opacity: q, transform: `scale(${1.04 - 0.04 * q})`}} />
 			{label && (
-				<div style={{position: 'absolute', left: x0, top: y0 - 46, opacity: q, transform: `translateY(${(1 - q) * 10}px)`, background: color, color: '#111',
+				<div style={{position: 'absolute', left: x0, top: below ? y1 + 12 : y0 - 46, opacity: q, transform: `translateY(${(1 - q) * (below ? -10 : 10)}px)`, background: color, color: '#111',
 					fontFamily: F.mono, fontSize: 18, fontWeight: 500, padding: '6px 12px', borderRadius: 8, letterSpacing: '0.04em', whiteSpace: 'nowrap'}}>{label}</div>
 			)}
 		</>
